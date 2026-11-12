@@ -48,6 +48,35 @@
 # strengths: ルーティング(model=auto)と批評ペア選定に使う。
 # for: UIのモデル選択に「タグ名 (用途)」として出す短い説明。
 models:
+  # kind: music は音楽生成専用 (チャット・自動ルーティングには使わない)。
+  # backend: acestep は ACE-Step REST API (既定 port 8001)。
+  # 実測 2026-11-11 (RX 9070 XT 16GB): 30秒インスト turbo ウォーム36.1秒/初回61.9秒、
+  # 60秒日本語歌詞102.4秒。VRAMピークはアダプタ全体で約15〜16GB（他プロセス分を含む）。
+  music:
+    tag: 'acestep-v15-turbo'
+    kind: music
+    backend: acestep
+    base_url: 'http://127.0.0.1:8001'
+    dit_model: 'acestep-v15-turbo'
+    lm_model: 'acestep-5Hz-lm-1.7B'
+    lm_backend: 'pt'
+    tier: external
+    vocal_language: 'ja'
+    inference_steps: 8
+    for: '音楽生成 ACE-Step 1.5 turbo・歌詞/ボーカル可'
+  # 実測 2026-11-11: 30秒 xl-turbo ウォーム78.4秒/初回483.9秒（約9GBモデルDL込み）。
+  music_xl:
+    tag: 'acestep-v15-xl-turbo'
+    kind: music
+    backend: acestep
+    base_url: 'http://127.0.0.1:8001'
+    dit_model: 'acestep-v15-xl-turbo'
+    lm_model: 'acestep-5Hz-lm-1.7B'
+    lm_backend: 'pt'
+    tier: external
+    vocal_language: 'ja'
+    inference_steps: 8
+    for: '音楽生成 ACE-Step 1.5 XL turbo・高品質(低速)'
   deepseek_strata:
     tag: "deepseek-v4.1-flash"
     backend: openai
@@ -549,3 +578,45 @@ impl_plan_review:
   model_key: impl-plan-review
   timeout_sec: 240
   max_output_tokens: 2048
+
+# 種類別ワークスペース (hub.py が参照)。各種類の既定モデルと最適化値を持つ。
+# chat/agent の model は上の models キー、image/video は Local Gen Studio のモデルID、
+# music は kind: music のキー。candidates は UI の選択肢を strengths で絞る条件。
+studio:
+  base_url: 'http://127.0.0.1:8787'      # Local Gen Studio (画像・動画)。環境変数 LGS_BASE で上書き
+  token_file: 'C:/project/local-gen-studio/data/api_token.txt'   # LGS_TOKEN で上書き
+categories:
+  chat:
+    label: チャット
+    model: gemma             # VRAM全載り・tool/chat向き。応答速度を優先
+    fallback: [distill9b, distill4b, worker]
+    candidates: [chat, reasoning, speed]
+    think: false             # 会話は思考なしで初手を速く。UIで切替可
+    num_ctx: 8192
+    num_predict: 2048
+    history_chars: 24000     # 送る履歴の上限 (古い順に落とす)
+    system: 'あなたは日本語で簡潔かつ正確に答えるアシスタントです。不明な点は推測と事実を分けて述べます。'
+  agent:
+    label: エージェント
+    model: auto              # 既存の Run (code/swarm/orchestra/critique) をそのまま使う
+  image:
+    label: 画像
+    model: flux2-klein       # 4 steps で最速。品質重視は flux-dev / qwen-image
+    width: 1024
+    height: 1024
+    prompt_mode: expand      # 日本語→英語プロンプトの拡張 (translate で忠実訳)
+    unload_llm: true         # 生成前に Ollama のモデルを降ろして VRAM を空ける
+  video:
+    label: 動画
+    model: wan22-ti2v-5b-turbo   # 4 steps の蒸留版。通常版は 20 steps
+    width: 832
+    height: 480
+    frames: 49               # 4n+1 / 24fps で約2秒
+    prompt_mode: expand
+    unload_llm: true
+  music:
+    label: 音楽
+    model: music
+    duration: 30
+    lyrics_model: gemma      # 歌詞の下書きに使うチャットモデル
+    unload_llm: true         # ACE-Step はピーク15GB前後。生成前に Ollama を降ろす

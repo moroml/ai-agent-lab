@@ -26,6 +26,7 @@ import answer_cache
 import bench
 import openai_api
 import claude_review
+import hub
 import api_review
 import llm
 import router
@@ -39,6 +40,8 @@ app = FastAPI(title="AI Agent Lab")
 
 # OpenAI互換API (/v1/models, /v1/chat/completions) — openai_api.py 参照
 openai_api.register(app)
+# 種類別ワークスペース (チャット / 画像 / 動画 / 音楽) — hub.py 参照
+hub.register(app)
 
 
 @app.on_event("startup")

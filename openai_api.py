@@ -196,6 +196,8 @@ def register(app) -> None:
         data = [{"id": "auto", "object": "model", "created": now,
                  "owned_by": "ai-agent-lab"}]
         for key, m in (cfg.get("models") or {}).items():
+            if (m or {}).get("kind") == "music":
+                continue
             data.append({"id": key, "object": "model", "created": now,
                          "owned_by": "ai-agent-lab",
                          "description": (m or {}).get("for", "")})

@@ -481,7 +481,7 @@ export default function App() {
   return (
     // h-dvh: iOS Safari の 100vh はツールバー分を含むため、最下部の入力欄が
     // ツールバーの下に隠れて操作できなくなる。動的ビューポート高で回避する
-    <div className="flex h-dvh flex-col overflow-hidden bg-slate-950 text-slate-100">
+    <div className="flex h-full flex-col overflow-hidden bg-slate-950 text-slate-100">
       <Header
         gpu={gpu}
         connections={models?.connections ?? []}
