@@ -605,6 +605,14 @@ impl_plan_review:
 studio:
   base_url: 'http://127.0.0.1:8787'      # Local Gen Studio (画像・動画)。環境変数 LGS_BASE で上書き
   token_file: 'C:/project/local-gen-studio/data/api_token.txt'   # LGS_TOKEN で上書き
+# 画像・動画 (ComfyUI) と音楽 (ACE-Step) の GPU 切り替え (gpu_switch.py)。
+# 両方のモデルは VRAM 16GB に同時に載らないため、生成の直前に相手側を空ける。
+gpu_switch:
+  enabled: true
+  comfy_base: 'http://127.0.0.1:8188'
+  acestep_base: 'http://127.0.0.1:8001'
+  acestep_start: 'C:/project/ace-step/start-ace-detached.ps1'
+  start_timeout: 180
 categories:
   chat:
     label: チャット

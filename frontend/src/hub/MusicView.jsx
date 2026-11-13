@@ -20,6 +20,7 @@ export default function MusicView() {
   const [elapsed, setElapsed] = useState(0);
   const [error, setError] = useState("");
   const [fresh, setFresh] = useState(null);
+  const [notice, setNotice] = useState("");
   const timer = useRef(null);
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -65,6 +66,7 @@ export default function MusicView() {
         instrumental: form.instrumental, duration: Number(form.duration), title: form.title || form.theme.slice(0, 40),
       });
       setFresh(r.file);
+      setNotice(r.gpu_switch?.length ? r.gpu_switch.join("・") : "");
       reload();
     } catch (e) {
       setError(e.message);
@@ -86,7 +88,7 @@ export default function MusicView() {
       <section className="space-y-4 p-4 lg:w-[440px] lg:shrink-0 lg:overflow-y-auto lg:border-r lg:border-slate-800">
         <h1 className="flex items-center gap-2 text-base font-semibold text-amber-200"><Music size={18} aria-hidden="true" /> 曲を作る</h1>
         {current && !current.connected && (
-          <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">ACE-Step（{current.base_url}）が応答していません。起動してから生成してください。</p>
+          <p className="rounded-lg border border-slate-700 bg-slate-900/60 px-3 py-2 text-xs text-slate-300">ACE-Step は停止中です。生成するときに画像側のモデルを解放して自動で起動します（初回は1分ほど余分にかかります）。</p>
         )}
 
         <Field label="テーマ（日本語でOK）">
@@ -138,11 +140,12 @@ export default function MusicView() {
         {current?.for && <p className="text-[11px] text-slate-500">{current.for}</p>}
 
         <ErrorNote text={error} onClose={() => setError("")} />
+        {notice && <p className="text-[11px] text-slate-400">GPU の切り替え: {notice}</p>}
         <Button accent="amber" className="w-full" onClick={generate} disabled={!!busy || !(form.style.trim() || form.theme.trim())}>
           <Disc3 size={16} className={busy === "作曲中…" ? "animate-spin" : ""} aria-hidden="true" />
           {busy ? `${busy}${busy === "作曲中…" ? ` ${fmtTime(elapsed)}` : ""}` : "生成する"}
         </Button>
-        {busy === "作曲中…" && <p className="text-[11px] text-slate-500">30秒の曲でおよそ40秒〜（初回はモデル読込で+30秒）。生成前にチャット用モデルをVRAMから降ろします。</p>}
+        {busy === "作曲中…" && <p className="text-[11px] text-slate-500">30秒の曲でおよそ40秒〜（ACE-Step の起動・モデル読込があると+1分ほど）。生成前にチャットと画像のモデルを VRAM から降ろします。</p>}
       </section>
 
       <section className="min-h-0 flex-1 p-4 lg:overflow-y-auto">

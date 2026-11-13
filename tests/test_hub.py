@@ -24,9 +24,15 @@ def client(monkeypatch):
     monkeypatch.setattr(llm, "load_config", lambda *a, **k: CFG)
     monkeypatch.setenv("LGS_TOKEN", "tok")
     monkeypatch.delenv("LGS_BASE", raising=False)
+
+    async def no_switch(cfg):
+        return []
+    # 実機の ComfyUI / ACE-Step に触れない (差し替え忘れで本物の ACE-Step を止めた 2026-11-13)
+    monkeypatch.setattr(hub.gpu_switch, "for_studio", no_switch)
+    monkeypatch.setattr(hub.gpu_switch, "for_music", no_switch)
     app = FastAPI()
     hub.register(app)
-    return TestClient(app, client=("127.0.0.1", 50000))
+    return TestClient(app, base_url="http://127.0.0.1:8765", client=("127.0.0.1", 50000))
 
 
 REAL_CLIENT = httpx.AsyncClient
@@ -54,7 +60,7 @@ def test_studio_proxy_injects_token_and_strips_secret(client, monkeypatch):
         return httpx.Response(200, json={"job_id": "j1"})
     mock_studio(monkeypatch, handler)
     r = client.post("/studio/generate", json={"model": "flux2-klein", "prompt_en": "x", "secret": True})
-    assert r.json() == {"job_id": "j1"}
+    assert r.json() == {"job_id": "j1", "gpu_switch": []}
     assert seen["auth"] == "Bearer tok" and seen["url"] == "http://lgs.test/api/generate"
     assert "secret" not in seen["body"]
 
@@ -142,7 +148,7 @@ async def test_free_vram_skips_while_agent_runs(monkeypatch):
 def test_remote_requests_need_api_key(monkeypatch):
     class Req:
         client = type("C", (), {"host": "192.168.1.5"})()
-        headers = {}
+        headers = {"host": "127.0.0.1:8765"}
     monkeypatch.setattr(hub.openai_api, "api_key", lambda: "k")
     with pytest.raises(Exception) as e:
         hub.require_local_or_key(Req())
@@ -158,9 +164,35 @@ def test_remote_requests_need_api_key(monkeypatch):
 def test_cross_site_post_is_rejected(client):
     r = client.post("/studio/jobs/j1/cancel", headers={"Origin": "https://evil.example"})
     assert r.status_code == 403
+    # DNS リバインディング: Origin と Host が攻撃者ドメインで一致していても拒否する
+    r = client.post("/studio/jobs/j1/cancel", headers={"Host": "evil.example:8765", "Origin": "http://evil.example:8765"})
+    assert r.status_code == 403
+
+
+def test_studio_refuses_while_music_runs(client, monkeypatch):
+    mock_studio(monkeypatch, lambda req: pytest.fail("must not submit"))
+
+    async def hold():
+        async with hub.gpu_switch.music_busy:
+            return client.post("/studio/generate", json={"model": "m", "prompt_en": "x"})
+    import asyncio
+    r = asyncio.run(hold())
+    assert r.status_code == 409 and "音楽" in r.json()["detail"]
 
 
 def test_categories_hide_music_and_system_prompt(client):
     d = client.get("/hub/categories").json()
     assert "system" not in d["categories"]["chat"]
     assert {m["key"] for m in d["chat_models"]} == {"a", "b"}
+
+
+def test_explicit_chat_model_is_not_replaced(client, monkeypatch):
+    async def installed():
+        return ["ta"]
+
+    async def usable(cfg, key, inst, _p=None):
+        return (llm.resolve(cfg, key)["tag"] in inst, "not_installed")
+    monkeypatch.setattr(llm, "list_models", installed)
+    monkeypatch.setattr(llm, "model_usable", usable)
+    r = client.post("/hub/chat", json={"model": "b", "messages": [{"role": "user", "content": "x"}]})
+    assert r.status_code == 400   # b が使えないとき a に黙って差し替えない

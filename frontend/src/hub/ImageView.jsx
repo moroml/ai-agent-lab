@@ -97,7 +97,7 @@ export default function ImageView({ onToVideo }) {
       const seed = form.seed === "" ? null : Number(form.seed);
       const res = await generateImage({ model: form.model, prompt_en: en, prompt_ja: form.ja, negative_en: form.negative, width: size.w, height: size.h, seed });
       startJob(res.job_id);
-      setBusy("生成中…");
+      setBusy(res.gpu_switch?.length ? `${res.gpu_switch.join("・")}して生成中…` : "生成中…");
     } catch (e) {
       setBusy("");
       setError(e.message);

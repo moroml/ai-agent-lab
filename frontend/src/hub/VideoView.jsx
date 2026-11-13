@@ -76,7 +76,7 @@ export default function VideoView({ source, onSourceChange }) {
         prompt_en: en, prompt_ja: form.ja, width: frame.w, height: frame.h, frames: len.frames, segments: len.segments,
       });
       startJob(res.job_id);
-      setBusy("生成中…");
+      setBusy(res.gpu_switch?.length ? `${res.gpu_switch.join("・")}して生成中…` : "生成中…");
     } catch (e) {
       setBusy("");
       setError(e.message);

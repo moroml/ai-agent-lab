@@ -20,6 +20,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
+import gpu_switch
 import llm
 import music
 import openai_api
@@ -28,6 +29,9 @@ router = APIRouter()
 LGS_DEFAULT = "http://127.0.0.1:8787"
 _token_cache: tuple[str, float] | None = None
 _background: set = set()   # create_task の参照保持 (GC で途中終了させない)
+
+
+LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
 
 def require_local_or_key(request: Request) -> None:
@@ -41,10 +45,15 @@ def require_local_or_key(request: Request) -> None:
         raise HTTPException(403, "別のサイトからの要求は受け付けません")
     host = request.client.host if request.client else ""
     try:
-        if ipaddress.ip_address(host).is_loopback:
-            return
+        loopback = ipaddress.ip_address(host).is_loopback
     except ValueError:
-        pass
+        loopback = False
+    if loopback:
+        # DNS リバインディング対策: 攻撃者ドメインを 127.0.0.1 に向けると Origin と Host が
+        # 一致したまま接続元がループバックになる。Host はローカルの名前だけ許す
+        if urlsplit("//" + request.headers.get("host", "")).hostname not in LOCAL_HOSTS:
+            raise HTTPException(403, "このPCからは 127.0.0.1 か localhost で開いてください")
+        return
     if not openai_api.api_key():
         raise HTTPException(403, "このPC以外から使うには OpenAI 互換 API のキーを発行してください")
     openai_api._check_auth(request)
@@ -165,7 +174,7 @@ async def studio_generate(request: Request) -> dict:
     require_local_or_key(request)
     body = await request.json()
     body.pop("secret", None)   # シークレットは LGS 本体の画面で扱う (中継では保存先が曖昧になる)
-    return await _studio("POST", "/api/generate", json_body=body, timeout=60)
+    return await _submit_studio("/api/generate", body, 60)
 
 
 @router.post("/studio/generate-video")
@@ -174,7 +183,20 @@ async def studio_generate_video(request: Request) -> dict:
     body = await request.json()
     body.pop("secret", None)
     body.pop("source_secret_file", None)
-    return await _studio("POST", "/api/generate-video", json_body=body, timeout=120)
+    return await _submit_studio("/api/generate-video", body, 120)
+
+
+async def _submit_studio(path: str, body: dict, timeout: float) -> dict:
+    """ACE-Step を止めてから投入する。止める〜投入の間に音楽側が ComfyUI を解放しないよう
+    同じロックで直列にする (投入後は ComfyUI のキューを見て音楽側が待つ)。"""
+    if gpu_switch.music_busy.locked():
+        raise HTTPException(409, "音楽を生成中です。終わってから画像・動画を生成してください")
+    async with gpu_switch.music_busy:
+        try:
+            switched = await gpu_switch.for_studio(llm.load_config())
+        except gpu_switch.SwitchError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return {**await _studio("POST", path, json_body=body, timeout=timeout), "gpu_switch": switched}
 
 
 @router.get("/studio/jobs/{job_id}")
@@ -265,19 +287,19 @@ def trim_history(messages: list[dict], budget_chars: int) -> list[dict]:
 
 
 async def pick_chat_model(cfg: dict, requested: str | None, cat: dict) -> str:
-    """明示指定 → 種類の既定 → fallback の順で、今使えるモデルを返す。"""
+    """明示指定ならそのモデルだけ。auto なら種類の既定 → fallback → default の順で使えるもの。"""
     installed = set(await llm.list_models())
-    order = [requested] if requested and requested != "auto" else []
-    order += [cat.get("model")] + list(cat.get("fallback") or []) + [cfg.get("default")]
+    if requested and requested != "auto":
+        ok, status = await llm.model_usable(cfg, requested, installed)
+        if ok:
+            return requested
+        raise HTTPException(400, llm.unusable_reason(llm.resolve(cfg, requested), status))
+    order = [cat.get("model")] + list(cat.get("fallback") or []) + [cfg.get("default")]
     for key in dict.fromkeys(k for k in order if k):
-        if key in (cfg.get("models") or {}) or requested == key:
+        if key in (cfg.get("models") or {}):
             ok, _ = await llm.model_usable(cfg, key, installed)
             if ok:
                 return key
-    if requested and requested != "auto":
-        info = llm.resolve(cfg, requested)
-        ok, status = await llm.model_usable(cfg, requested, installed)
-        raise HTTPException(400, llm.unusable_reason(info, status))
     raise HTTPException(503, "チャットに使えるモデルがありません (Ollama の起動とモデル導入を確認してください)")
 
 
@@ -434,15 +456,21 @@ async def music_generate(req: MusicReq, request: Request) -> dict:
     cat = _cat(cfg, "music")
     key = req.model or cat.get("model") or "music"
     duration = req.duration if req.duration is not None else cat.get("duration")
-    unloaded = await free_vram_for_generation(cfg, cat, _music_running())
-    try:
-        result = await music.generate_music(
-            cfg, key, req.prompt, lyrics=req.lyrics, duration=duration, seed=req.seed,
-            instrumental=req.instrumental, vocal_language=req.vocal_language)
-    except music.MusicInputError as exc:
-        raise HTTPException(400, str(exc)) from exc
-    except music.MusicError as exc:
-        raise HTTPException(502, str(exc)) from exc
+    if (cfg.get("models") or {}).get(key, {}).get("kind") != "music":
+        raise HTTPException(400, f"音楽生成モデルが見つかりません: {key}")
+    async with gpu_switch.music_busy:   # 生成中に画像側が ACE-Step を止めないように
+        unloaded = await free_vram_for_generation(cfg, cat, _music_running())
+        try:
+            switched = await gpu_switch.for_music(cfg)
+            result = await music.generate_music(
+                cfg, key, req.prompt, lyrics=req.lyrics, duration=duration, seed=req.seed,
+                instrumental=req.instrumental, vocal_language=req.vocal_language)
+        except music.MusicInputError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        except gpu_switch.SwitchError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except music.MusicError as exc:
+            raise HTTPException(502, str(exc)) from exc
     meta = {"title": (req.title or "").strip() or req.prompt[:40], "prompt": req.prompt,
             "lyrics": "" if req.instrumental else (req.lyrics or ""),
             "instrumental": req.instrumental, "created_at": time.time(),
@@ -453,7 +481,7 @@ async def music_generate(req: MusicReq, request: Request) -> dict:
     except OSError:
         pass   # メタ情報は一覧表示用。保存に失敗しても音声は返す
     return {**meta, "file": result["file"], "url": "/music/file/" + result["file"],
-            "unloaded": unloaded}
+            "unloaded": unloaded, "gpu_switch": switched}
 
 
 def list_music(root: Path, limit: int = 100) -> list[dict]:

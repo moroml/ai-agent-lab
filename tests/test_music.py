@@ -132,6 +132,7 @@ def test_music_routes(monkeypatch, tmp_path):
     async def no_unload(*args, **kwargs):
         return []
     monkeypatch.setattr(hub, "free_vram_for_generation", no_unload)   # 実機の Ollama を降ろさない
+    monkeypatch.setattr(hub.gpu_switch, "for_music", no_unload)   # 実機の ComfyUI / ACE-Step に触れない
     (tmp_path / "sample.mp3").write_bytes(b"audio")
     outside = tmp_path.parent / "outside.mp3"
     outside.write_bytes(b"secret")
@@ -142,7 +143,7 @@ def test_music_routes(monkeypatch, tmp_path):
         names = ("..%2Foutside.mp3", "..%5Coutside.mp3", "%2Fetc%2Fpasswd")
     original = httpx.AsyncClient
     async def run():
-        async with original(transport=httpx.ASGITransport(app=server.app), base_url="http://test") as client:
+        async with original(transport=httpx.ASGITransport(app=server.app), base_url="http://127.0.0.1") as client:
             for name in names:
                 response = await client.get("/music/file/" + name)
                 assert response.status_code in (400, 404)
