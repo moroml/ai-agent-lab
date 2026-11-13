@@ -598,3 +598,45 @@ impl_plan_review:
   model_key: impl-plan-review
   timeout_sec: 240
   max_output_tokens: 2048
+
+# 種類別ワークスペース (hub.py が参照)。各種類の既定モデルと最適化値を持つ。
+# chat/agent の model は上の models キー、image/video は Local Gen Studio のモデルID、
+# music は kind: music のキー。candidates は UI の選択肢を strengths で絞る条件。
+studio:
+  base_url: 'http://127.0.0.1:8787'      # Local Gen Studio (画像・動画)。環境変数 LGS_BASE で上書き
+  token_file: 'C:/project/local-gen-studio/data/api_token.txt'   # LGS_TOKEN で上書き
+categories:
+  chat:
+    label: チャット
+    model: gemma             # VRAM全載り・tool/chat向き。応答速度を優先
+    fallback: [distill9b, distill4b, worker]
+    candidates: [chat, reasoning, speed]
+    think: false             # 会話は思考なしで初手を速く。UIで切替可
+    num_ctx: 8192
+    num_predict: 2048
+    history_chars: 24000     # 送る履歴の上限 (古い順に落とす)
+    system: 'あなたは日本語で簡潔かつ正確に答えるアシスタントです。不明な点は推測と事実を分けて述べます。'
+  agent:
+    label: エージェント
+    model: auto              # 既存の Run (code/swarm/orchestra/critique) をそのまま使う
+  image:
+    label: 画像
+    model: flux2-klein       # 4 steps で最速。品質重視は flux-dev / qwen-image
+    width: 1024
+    height: 1024
+    prompt_mode: expand      # 日本語→英語プロンプトの拡張 (translate で忠実訳)
+    unload_llm: true         # 生成前に Ollama のモデルを降ろして VRAM を空ける
+  video:
+    label: 動画
+    model: wan22-ti2v-5b-turbo   # 4 steps の蒸留版。通常版は 20 steps
+    width: 832
+    height: 480
+    frames: 49               # 4n+1 / 24fps で約2秒
+    prompt_mode: expand
+    unload_llm: true
+  music:
+    label: 音楽
+    model: music
+    duration: 30
+    lyrics_model: gemma      # 歌詞の下書きに使うチャットモデル
+    unload_llm: true         # ACE-Step はピーク15GB前後。生成前に Ollama を降ろす

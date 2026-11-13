@@ -13,6 +13,25 @@ agent-orchestra(並列分解・批評ループ・SSEダッシュボード)と ai
 > 実測ベースのコンテキスト管理、finishゲートの厳密化、swarm の実統合ラウンド、
 > SSEバッチ化ほか。詳細は「改修の要点」節。
 
+## 種類別ワークスペース (2026-11-12)
+
+画面左（スマホでは下）のレールで、用途ごとに専用の画面へ切り替える。URL は `/#chat` `/#agent`
+`/#image` `/#video` `/#music`。既定モデルと最適化値は `models.yaml` の `categories:` 節にある。
+
+| 種類 | 画面 | 使うもの | 最適化 |
+|---|---|---|---|
+| 💬 チャット | 会話一覧＋吹き出し。モデル選択・思考の有無・停止・再生成・コピー | Ollama 等のチャットモデル（既定 `gemma`、使えなければ `fallback` 順） | Run を作らない軽い経路。思考なし既定・履歴は文字数上限で古い順に落とす・画面を開いた時点でモデルを先読み（エージェント実行中は追い出さない） |
+| 🤖 エージェント | 従来の Run 画面（下記） | code / swarm / orchestra / critique | 従来どおり |
+| 🖼 画像 | 生成パネル＋ギャラリー（お気に入り・再利用・ゴミ箱・画像→動画） | Local Gen Studio（FLUX / Qwen-Image / Z-Image 等） | 日本語→英語プロンプトの自動作成（拡張 / 忠実訳 / 直接）、用途プリセット、縦横比プリセット |
+| 🎬 動画 | 起点（文章 or 画像）→ 長さ・画角 → 再生カード | Local Gen Studio（Wan 2.2 TI2V、既定は4ステップ蒸留版） | 4n+1 フレームを秒数で選択、5秒超は区間連結、画像の向きに合わせて画角を自動選択 |
+| 🎵 音楽 | 曲調タグ・歌詞エディタ＋トラック一覧（試聴・再利用・削除） | ACE-Step 1.5（`music` / `music_xl`） | テーマから歌詞と曲調タグを LLM が下書き、生成前に Ollama のモデルを VRAM から降ろす |
+
+- 画像・動画は **Local Gen Studio**（`C:\project\local-gen-studio\start-studio.bat` で ComfyUI 8188 + アプリ 8787）
+  を `/studio/*` で中継する。LGS の API トークンはサーバー側だけで読み（`studio.token_file` か環境変数
+  `LGS_TOKEN`）、ブラウザには渡さない。接続先は `studio.base_url` か `LGS_BASE`。シークレット生成は LGS 本体の画面で行う
+- 音楽は ACE-Step REST API（既定 `http://127.0.0.1:8001`）。生成物は `music_out/`（mp3 と同名 json のメタ情報）
+- `/hub/*` `/studio/*` `/music/*` はこのPCからは素通し、他の端末からは OpenAI 互換 API のキーが要る
+
 ## 実行モード(ダッシュボードから選択)
 
 | モード | 内容 |

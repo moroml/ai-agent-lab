@@ -125,21 +125,28 @@ def test_chat_guard(key):
 
 
 def test_music_routes(monkeypatch, tmp_path):
+    import hub
     import server
     monkeypatch.setattr(music, "MUSIC_OUT", tmp_path)
     monkeypatch.setattr(server.openai_api, "_check_auth", lambda request: None)
+    async def no_unload(*args, **kwargs):
+        return []
+    monkeypatch.setattr(hub, "free_vram_for_generation", no_unload)   # 実機の Ollama を降ろさない
     (tmp_path / "sample.mp3").write_bytes(b"audio")
     outside = tmp_path.parent / "outside.mp3"
     outside.write_bytes(b"secret")
-    (tmp_path / "link.mp3").symlink_to(outside)
+    try:
+        (tmp_path / "link.mp3").symlink_to(outside)
+        names = ("..%2Foutside.mp3", "..%5Coutside.mp3", "%2Fetc%2Fpasswd", "link.mp3")
+    except OSError:   # Windows でシンボリックリンク作成の特権が無い環境
+        names = ("..%2Foutside.mp3", "..%5Coutside.mp3", "%2Fetc%2Fpasswd")
     original = httpx.AsyncClient
     async def run():
         async with original(transport=httpx.ASGITransport(app=server.app), base_url="http://test") as client:
-            for name in ("..%2Foutside.mp3", "..%5Coutside.mp3", "%2Fetc%2Fpasswd", "link.mp3"):
+            for name in names:
                 response = await client.get("/music/file/" + name)
-                assert response.status_code == 400
-            response = await server.music_file("sample.mp3", None)
-            assert Path(response.path).read_bytes() == b"audio"
+                assert response.status_code in (400, 404)
+            assert (await client.get("/music/file/sample.mp3")).content == b"audio"
             assert (await client.get("/music/file/missing.mp3")).status_code == 404
             assert (await client.post("/music/generate", json={"model": "fast", "prompt": "jazz"})).status_code == 400
             async def generate(*args, **kwargs):

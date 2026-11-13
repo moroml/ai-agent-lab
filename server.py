@@ -26,9 +26,9 @@ import answer_cache
 import bench
 import openai_api
 import claude_review
+import hub
 import api_review
 import llm
-import music
 import router
 from artifacts import WORKSPACE as ARTIFACT_DIR
 from orchestrator import (CascadeOrchestrator, CodeOrchestrator, CritiqueOrchestrator,
@@ -40,6 +40,8 @@ app = FastAPI(title="AI Agent Lab")
 
 # OpenAI互換API (/v1/models, /v1/chat/completions) — openai_api.py 参照
 openai_api.register(app)
+# 種類別ワークスペース (チャット / 画像 / 動画 / 音楽) — hub.py 参照
+hub.register(app)
 
 
 @app.on_event("startup")
@@ -148,49 +150,6 @@ async def index() -> FileResponse:
 @app.get("/legacy")
 async def legacy() -> FileResponse:
     return FileResponse(STATIC / "index.html")
-
-
-class MusicRequest(BaseModel):
-    model: str = "music"
-    prompt: str
-    lyrics: str | None = None
-    duration: float | None = None
-    seed: int | None = None
-    instrumental: bool = False
-    vocal_language: str | None = None
-
-
-@app.get("/music/models")
-async def music_models(request: Request) -> dict:
-    openai_api._check_auth(request)
-    return await music.music_catalog(llm.load_config())
-
-
-@app.post("/music/generate")
-async def music_generate(req: MusicRequest, request: Request) -> dict:
-    openai_api._check_auth(request)
-    try:
-        result = await music.generate_music(
-            llm.load_config(), req.model, req.prompt, lyrics=req.lyrics,
-            duration=req.duration, seed=req.seed, instrumental=req.instrumental,
-            vocal_language=req.vocal_language)
-    except music.MusicInputError as exc:
-        raise HTTPException(400, str(exc)) from exc
-    except music.MusicError as exc:
-        raise HTTPException(502, str(exc)) from exc
-    return {**result, "url": "/music/file/" + result["file"]}
-
-
-@app.get("/music/file/{name:path}")
-async def music_file(name: str, request: Request) -> FileResponse:
-    openai_api._check_auth(request)
-    root = music.MUSIC_OUT.resolve()
-    path = (root / name).resolve()
-    if not name or "/" in name or "\\" in name or path.parent != root:
-        raise HTTPException(400, "音声ファイル名が不正です")
-    if not path.is_file():
-        raise HTTPException(404, "音声ファイルが見つかりません")
-    return FileResponse(path, media_type="audio/mpeg", filename=name)
 
 
 @app.get("/gpu")
