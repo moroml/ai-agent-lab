@@ -49,6 +49,14 @@ export default function Shell() {
   }, [kind]);
 
   const toVideo = useCallback((item) => { setVideoSource(item); setKind("video"); }, []);
+  // 一度開いた画面は隠すだけで残す(切り替えるたびに生成中のジョブの追跡や会話の受信が途切れないように)
+  const [visited, setVisited] = useState(() => new Set([kind]));
+  useEffect(() => setVisited((v) => (v.has(kind) ? v : new Set(v).add(kind))), [kind]);
+  const pane = (id, el) => visited.has(id) && (
+    <div className={kind === id ? "h-full" : "hidden"}>
+      <Suspense fallback={<div className="p-6 text-sm text-slate-400" role="status">読み込み中…</div>}>{el}</Suspense>
+    </div>
+  );
 
   return (
     <div className="flex h-dvh flex-col-reverse overflow-hidden bg-slate-950 text-slate-100 md:flex-row">
@@ -71,14 +79,10 @@ export default function Shell() {
         <div className={kind === "agent" ? "h-full" : "hidden"}>
           <App />
         </div>
-        {kind !== "agent" && (
-          <Suspense fallback={<div className="p-6 text-sm text-slate-400">読み込み中…</div>}>
-            {kind === "chat" && <ChatView />}
-            {kind === "image" && <ImageView onToVideo={toVideo} />}
-            {kind === "video" && <VideoView source={videoSource} onSourceChange={setVideoSource} />}
-            {kind === "music" && <MusicView />}
-          </Suspense>
-        )}
+        {pane("chat", <ChatView />)}
+        {pane("image", <ImageView onToVideo={toVideo} />)}
+        {pane("video", <VideoView source={videoSource} onSourceChange={setVideoSource} />)}
+        {pane("music", <MusicView />)}
       </main>
     </div>
   );
