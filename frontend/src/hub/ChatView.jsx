@@ -115,7 +115,19 @@ export default function ChatView() {
   }
 
   const startNew = () => { setCurrentId(null); setListOpen(false); setError(""); };
-  const remove = (id) => { setConvs((cs) => cs.filter((c) => c.id !== id)); if (id === currentId) setCurrentId(null); };
+  // 会話はこのブラウザにしか無く消すと戻せないので2段階(1回目で「削除?」→3秒以内にもう一度)
+  const [armed, setArmed] = useState(null);
+  useEffect(() => {
+    if (!armed) return undefined;
+    const t = setTimeout(() => setArmed(null), 3000);
+    return () => clearTimeout(t);
+  }, [armed]);
+  const remove = (id) => {
+    if (armed !== id) return setArmed(id);
+    setArmed(null);
+    setConvs((cs) => cs.filter((c) => c.id !== id));
+    if (id === currentId) setCurrentId(null);
+  };
 
   return (
     <div className="flex h-full">
@@ -136,8 +148,8 @@ export default function ChatView() {
               >
                 {c.title}
               </button>
-              <button type="button" onClick={() => remove(c.id)} className="min-h-10 px-2 text-slate-600 opacity-0 hover:text-red-300 group-hover:opacity-100 focus:opacity-100" aria-label={`「${c.title}」を削除`}>
-                <Trash2 size={14} aria-hidden="true" />
+              <button type="button" onClick={() => remove(c.id)} className={`min-h-10 px-2 text-xs ${armed === c.id ? "font-semibold text-red-300" : "text-slate-600 opacity-0 hover:text-red-300 group-hover:opacity-100 focus:opacity-100"}`} aria-label={armed === c.id ? `もう一度押すと「${c.title}」を削除` : `「${c.title}」を削除`}>
+                {armed === c.id ? "削除?" : <Trash2 size={14} aria-hidden="true" />}
               </button>
             </li>
           ))}
@@ -273,9 +285,7 @@ function Message({ m, last, busy, onRegenerate }) {
           {tps && <span>{m.meta.elapsed_sec}秒 · {tps} tok/s</span>}
           {m.stopped && <span className="text-amber-400">停止しました</span>}
           {m.content && (
-            <button type="button" onClick={() => navigator.clipboard?.writeText(m.content)} className="flex min-h-8 items-center gap-1 hover:text-slate-300">
-              <Copy size={12} aria-hidden="true" /> コピー
-            </button>
+            <CopyButton text={m.content} />
           )}
           {last && (
             <button type="button" onClick={onRegenerate} className="flex min-h-8 items-center gap-1 hover:text-slate-300">
@@ -285,5 +295,23 @@ function Message({ m, last, busy, onRegenerate }) {
         </div>
       )}
     </div>
+  );
+}
+
+// 押したら「コピーしました」/失敗を見せる(以前は押しても何も変わらなかった)
+function CopyButton({ text }) {
+  const [state, setState] = useState("");
+  useEffect(() => {
+    if (!state) return undefined;
+    const t = setTimeout(() => setState(""), 1500);
+    return () => clearTimeout(t);
+  }, [state]);
+  const copy = () => Promise.resolve(navigator.clipboard?.writeText(text))
+    .then(() => setState(navigator.clipboard ? "ok" : "ng"), () => setState("ng"));
+  return (
+    <button type="button" onClick={copy} className="flex min-h-8 items-center gap-1 hover:text-slate-300">
+      {state === "ok" ? <Check size={12} aria-hidden="true" /> : <Copy size={12} aria-hidden="true" />}
+      <span role="status">{state === "ok" ? "コピーしました" : state === "ng" ? "コピーできませんでした" : "コピー"}</span>
+    </button>
   );
 }

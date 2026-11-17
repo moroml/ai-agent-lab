@@ -24,7 +24,8 @@ export default function MusicView() {
   const timer = useRef(null);
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
-  const reload = () => musicList().then((d) => setTracks(d.items)).catch((e) => setError(e.message));
+  const [loaded, setLoaded] = useState(false);   // 初回の一覧取得前に「まだありません」と出さない
+  const reload = () => musicList().then((d) => setTracks(d.items)).catch((e) => setError(e.message)).finally(() => setLoaded(true));
   useEffect(() => {
     musicModels().then((d) => setModels(d.models)).catch((e) => setError(e.message));
     fetchCategories().then((c) => setForm((f) => ({ ...f, model: f.model || c.categories?.music?.model || "music", duration: f.duration || c.categories?.music?.duration || 30 }))).catch(() => {});
@@ -76,9 +77,20 @@ export default function MusicView() {
     }
   }
 
+  // 曲の削除は元に戻せないので2段階(1回目で「削除?」→3秒以内にもう一度)。一覧は成功時だけ外す
+  const [armed, setArmed] = useState(null);
+  useEffect(() => {
+    if (!armed) return undefined;
+    const t = setTimeout(() => setArmed(null), 3000);
+    return () => clearTimeout(t);
+  }, [armed]);
   async function remove(t) {
-    await deleteMusic(t.file).catch((e) => setError(e.message));
-    setTracks((xs) => xs.filter((x) => x.file !== t.file));
+    if (armed !== t.file) return setArmed(t.file);
+    setArmed(null);
+    try {
+      await deleteMusic(t.file);
+      setTracks((xs) => xs.filter((x) => x.file !== t.file));
+    } catch (e) { setError(e.message); }
   }
 
   const reuse = (t) => setForm((f) => ({ ...f, style: t.prompt || "", lyrics: t.lyrics || "", instrumental: !!t.instrumental, duration: Math.round(t.duration || f.duration), title: t.title || "" }));
@@ -163,7 +175,9 @@ export default function MusicView() {
                   <p className="truncate text-[11px] text-slate-500">{[t.prompt, t.duration && fmtTime(t.duration), t.model, t.elapsed_sec && `生成${Math.round(t.elapsed_sec)}秒`].filter(Boolean).join(" · ")}</p>
                 </div>
                 <button type="button" onClick={() => reuse(t)} className="min-h-8 px-2 text-[11px] text-slate-400 hover:text-amber-200">再利用</button>
-                <button type="button" onClick={() => remove(t)} className="min-h-8 min-w-8 text-slate-500 hover:text-red-300" aria-label={`「${t.title}」を削除`}><Trash2 size={14} className="mx-auto" aria-hidden="true" /></button>
+                <button type="button" onClick={() => remove(t)} className={`min-h-8 min-w-8 px-1 text-[11px] ${armed === t.file ? "font-semibold text-red-300" : "text-slate-500 hover:text-red-300"}`} aria-label={armed === t.file ? `もう一度押すと「${t.title}」を削除` : `「${t.title}」を削除`}>
+                  {armed === t.file ? "削除?" : <Trash2 size={14} className="mx-auto" aria-hidden="true" />}
+                </button>
               </div>
               <audio src={t.url} controls preload="none" autoPlay={t.file === fresh} className="mt-2 w-full" />
               {t.lyrics && (
@@ -175,7 +189,8 @@ export default function MusicView() {
             </li>
           ))}
         </ul>
-        {!tracks.length && <p className="py-16 text-center text-sm text-slate-500">まだ曲がありません</p>}
+        {!loaded && <p role="status" className="py-16 text-center text-sm text-slate-500">読み込んでいます…</p>}
+        {loaded && !tracks.length && <p className="py-16 text-center text-sm text-slate-500">まだ曲がありません</p>}
       </section>
     </div>
   );

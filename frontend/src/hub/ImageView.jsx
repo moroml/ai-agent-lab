@@ -40,22 +40,33 @@ export default function ImageView({ onToVideo }) {
   const [favOnly, setFavOnly] = useState(false);
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
-  const reload = useCallback(() => studioGallery("image", 120).then((d) => setItems(d.items)).catch((e) => setError(e.message)), []);
+  const [loaded, setLoaded] = useState(false);   // 初回の一覧取得前に「まだありません」と出さない
+  const reload = useCallback(() => studioGallery("image", 120).then((d) => setItems(d.items)).catch((e) => setError(e.message)).finally(() => setLoaded(true)), []);
   const [job, startJob] = useStudioJob((j) => {
     setBusy("");
     if (j.status === "error") setError(j.error || j.progress_text || "生成に失敗しました");
     reload();
   });
 
-  useEffect(() => {
-    studioStatus().then((s) => {
+  const loadStatus = useCallback(() => studioStatus()
+    .then((s) => {
       setStatus(s);
       if (!s.connected) return;
       studioCatalog().then(setCatalog).catch((e) => setError(e.message));
       reload();
-    });
+    })
+    .catch((e) => setStatus({ connected: false, reason: `状態を取得できません: ${e.message}` })), [reload]);
+
+  // 画面は隠れても残るので、エンジンの起動・解放のたびに状態を取り直す
+  useEffect(() => {
+    window.addEventListener("system-changed", loadStatus);
+    return () => window.removeEventListener("system-changed", loadStatus);
+  }, [loadStatus]);
+
+  useEffect(() => {
+    loadStatus();
     fetchCategories().then((c) => setForm((f) => (f.model ? f : { ...f, model: c.categories?.image?.model || "flux2-klein" }))).catch(() => {});
-  }, [reload, setForm]);
+  }, [loadStatus, setForm]);
 
   const useCases = useMemo(() => (catalog?.use_cases ?? []).filter((u) => u.kind !== "video"), [catalog]);
   const size = SIZES.find((s) => s.value === form.size) ?? SIZES[0];
@@ -109,18 +120,23 @@ export default function ImageView({ onToVideo }) {
     setViewing(null);
   }
 
+  // 一覧は API が成功したときだけ書き換える(失敗しても消えたように見せない)
   async function toggleFav(it) {
-    await setFavorite(it.id, !it.is_favorite).catch((e) => setError(e.message));
-    setItems((xs) => xs.map((x) => (x.id === it.id ? { ...x, is_favorite: !x.is_favorite } : x)));
+    try {
+      await setFavorite(it.id, !it.is_favorite);
+      setItems((xs) => xs.map((x) => (x.id === it.id ? { ...x, is_favorite: !x.is_favorite } : x)));
+    } catch (e) { setError(e.message); }
   }
 
   async function trash(it) {
-    await trashGeneration(it.id).catch((e) => setError(e.message));
-    setItems((xs) => xs.filter((x) => x.id !== it.id));
-    setViewing(null);
+    try {
+      await trashGeneration(it.id);
+      setItems((xs) => xs.filter((x) => x.id !== it.id));
+      setViewing(null);
+    } catch (e) { setError(e.message); }
   }
 
-  if (status && !status.connected) return <div className="p-6"><StudioOffline reason={status.reason} /></div>;
+  if (status && !status.connected) return <div className="p-6"><StudioOffline reason={status.reason} onReady={loadStatus} /></div>;
   const shown = favOnly ? items.filter((x) => x.is_favorite) : items;
 
   return (
@@ -130,7 +146,7 @@ export default function ImageView({ onToVideo }) {
         {status?.comfy === false && (
           <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
             ComfyUI(8188) が起動していません。
-            <StudioStartButton className="mt-2" />
+            <StudioStartButton className="mt-2" onReady={loadStatus} />
           </div>
         )}
 
@@ -212,7 +228,8 @@ export default function ImageView({ onToVideo }) {
             </button>
           ))}
         </div>
-        {!shown.length && <p className="py-16 text-center text-sm text-slate-500">まだ画像がありません</p>}
+        {!loaded && <p role="status" className="py-16 text-center text-sm text-slate-500">読み込んでいます…</p>}
+        {loaded && !shown.length && <p className="py-16 text-center text-sm text-slate-500">まだ画像がありません</p>}
       </section>
 
       {viewing && (

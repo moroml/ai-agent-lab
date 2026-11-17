@@ -72,12 +72,12 @@ export function Progress({ value, text, accent }) {
   );
 }
 
-export function StudioOffline({ reason }) {
+export function StudioOffline({ reason, onReady }) {
   return (
     <div className="rounded-xl border border-slate-700 bg-slate-900/60 p-4 text-sm text-slate-300">
       <p className="font-medium text-slate-100">Local Gen Studio に接続できません</p>
       <p className="mt-1 text-slate-400">{reason}</p>
-      <StudioStartButton />
+      <StudioStartButton onReady={onReady} />
     </div>
   );
 }
@@ -118,21 +118,31 @@ export function usePersisted(key, initial) {
   return [v, setV];
 }
 
-/** Local Gen Studio をアプリ内から起動する(以前は start-studio.bat を手で実行していた)。 */
-export function StudioStartButton({ className = "mt-3" }) {
+/**
+ * Local Gen Studio をアプリ内から起動する(以前は start-studio.bat を手で実行していた)。
+ * ComfyUI まで準備できたら onReady で呼び出し元に状態を取り直させる。ページの再読込はしない
+ * (エージェントの下書きなど、他の画面の入力途中の内容が消えるため)。
+ */
+export function StudioStartButton({ className = "mt-3", onReady }) {
   const [state, setState] = useState({ busy: false, text: "", error: false });
+  const timer = useRef(null);
+  const readyRef = useRef(onReady);
+  readyRef.current = onReady;
+  useEffect(() => () => clearTimeout(timer.current), []);
   const start = () => {
     setState({ busy: true, text: "", error: false });
     startStudio()
       .then((r) => {
         setState({ busy: true, text: (r.done ?? []).join(" / "), error: false });
-        // ComfyUI まで準備できたら画面を読み直す (状態は各画面の初回取得でしか見ていないため)
         const until = Date.now() + 5 * 60 * 1000;
+        const again = () => { timer.current = setTimeout(poll, 3000); };
         const poll = () => studioStatus().then((s) => {
-          if (s.connected && s.comfy !== false) window.location.reload();
-          else if (Date.now() < until) setTimeout(poll, 3000);
-          else setState({ busy: false, text: "5分待っても準備できませんでした。もう一度押すか、LGS のログを確認してください", error: true });
-        }).catch(() => setTimeout(poll, 3000));
+          if (s.connected && s.comfy !== false) {
+            setState({ busy: false, text: "準備できました", error: false });
+            readyRef.current?.();
+          } else if (Date.now() < until) again();
+          else setState({ busy: false, text: "5分待っても準備できませんでした。もう一度押してください", error: true });
+        }).catch(again);
         poll();
       })
       .catch((e) => setState({ busy: false, text: e.message, error: true }));

@@ -31,22 +31,33 @@ export default function VideoView({ source, onSourceChange }) {
   const [error, setError] = useState("");
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
-  const reload = useCallback(() => studioGallery("video", 60).then((d) => setItems(d.items)).catch((e) => setError(e.message)), []);
+  const [loaded, setLoaded] = useState(false);   // 初回の一覧取得前に「まだありません」と出さない
+  const reload = useCallback(() => studioGallery("video", 60).then((d) => setItems(d.items)).catch((e) => setError(e.message)).finally(() => setLoaded(true)), []);
   const [job, startJob] = useStudioJob((j) => {
     setBusy("");
     if (j.status === "error") setError(j.error || j.progress_text || "生成に失敗しました");
     reload();
   });
 
-  useEffect(() => {
-    studioStatus().then((s) => {
+  const loadStatus = useCallback(() => studioStatus()
+    .then((s) => {
       setStatus(s);
       if (!s.connected) return;
       studioCatalog().then(setCatalog).catch((e) => setError(e.message));
       reload();
-    });
+    })
+    .catch((e) => setStatus({ connected: false, reason: `状態を取得できません: ${e.message}` })), [reload]);
+
+  // 画面は隠れても残るので、エンジンの起動・解放のたびに状態を取り直す
+  useEffect(() => {
+    window.addEventListener("system-changed", loadStatus);
+    return () => window.removeEventListener("system-changed", loadStatus);
+  }, [loadStatus]);
+
+  useEffect(() => {
+    loadStatus();
     fetchCategories().then((c) => setForm((f) => (f.model ? f : { ...f, model: c.categories?.video?.model || "wan22-ti2v-5b-turbo" }))).catch(() => {});
-  }, [reload, setForm]);
+  }, [loadStatus, setForm]);
 
   // 画像から来たら、その画像の向きに合わせる
   useEffect(() => {
@@ -89,11 +100,13 @@ export default function VideoView({ source, onSourceChange }) {
   }
 
   async function trash(it) {
-    await trashGeneration(it.id).catch((e) => setError(e.message));
-    setItems((xs) => xs.filter((x) => x.id !== it.id));
+    try {
+      await trashGeneration(it.id);
+      setItems((xs) => xs.filter((x) => x.id !== it.id));   // 成功したときだけ一覧から外す
+    } catch (e) { setError(e.message); }
   }
 
-  if (status && !status.connected) return <div className="p-6"><StudioOffline reason={status.reason} /></div>;
+  if (status && !status.connected) return <div className="p-6"><StudioOffline reason={status.reason} onReady={loadStatus} /></div>;
 
   return (
     <div className="h-full overflow-y-auto">
@@ -173,7 +186,8 @@ export default function VideoView({ source, onSourceChange }) {
               </article>
             ))}
           </div>
-          {!items.length && <p className="py-12 text-center text-sm text-slate-500">まだ動画がありません</p>}
+          {!loaded && <p role="status" className="py-12 text-center text-sm text-slate-500">読み込んでいます…</p>}
+          {loaded && !items.length && <p className="py-12 text-center text-sm text-slate-500">まだ動画がありません</p>}
         </section>
       </div>
 
