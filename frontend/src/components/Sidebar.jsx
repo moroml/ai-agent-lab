@@ -12,7 +12,7 @@ import { RUN_STATUS, fmtAgo } from "../derive.js";
  * lg未満ではオフキャンバス(ハンバーガーで開閉)、lg以上は常設カラム。
  */
 function Sidebar({
-  runs, currentId, drafting, onSelect, onDelete, onNew, onBench, benching, onInsight, insighting, onConnections, connecting, open, onClose,
+  runs, runsError, currentId, drafting, onSelect, onDelete, onNew, onBench, benching, onInsight, insighting, onConnections, connecting, open, onClose,
 }) {
   const [query, setQuery] = useState("");
   // 削除は誤操作防止の2段階確認(1回目で「削除?」→3秒以内の再クリックで実行)
@@ -120,6 +120,7 @@ function Sidebar({
     <>
       {/* lg未満: オフキャンバス時の暗転 */}
       <div
+        aria-hidden="true"
         onClick={onClose}
         className={`fixed inset-0 z-30 bg-black/50 transition-opacity lg:hidden ${
           open ? "opacity-100" : "pointer-events-none opacity-0"
@@ -231,7 +232,7 @@ function Sidebar({
           {group("履歴", history)}
           {!live.length && !history.length && !drafting && !benching && (
             <li className="px-3 py-6 text-center text-[12px] text-slate-400">
-              {query ? "一致するタスクがありません" : "まだタスクがありません"}
+              {runsError ? "サーバーに接続できません" : query ? "一致するタスクがありません" : "まだタスクがありません"}
             </li>
           )}
         </ul>

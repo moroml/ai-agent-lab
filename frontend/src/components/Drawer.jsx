@@ -32,6 +32,7 @@ export default function Drawer({ open, onClose, title, children, wide = false })
   return (
     <>
       <div
+        aria-hidden="true"
         onClick={onClose}
         className={`fixed inset-0 z-40 bg-black/30 transition-opacity duration-200 ${
           open ? "opacity-100" : "pointer-events-none opacity-0"

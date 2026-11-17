@@ -156,9 +156,10 @@ function CopyButton({ text }) {
   return (
     <button
       onClick={() => {
-        navigator.clipboard.writeText(text || "");
-        setDone(true);
-        setTimeout(() => setDone(false), 1500);
+        navigator.clipboard.writeText(text || "").then(() => {
+          setDone(true);
+          setTimeout(() => setDone(false), 1500);
+        }, () => {});
       }}
       className="flex items-center gap-1 rounded-md border border-zinc-700 px-2 py-1 text-[11px] text-zinc-400 hover:border-blue-500 hover:text-blue-400"
     >

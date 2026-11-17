@@ -9,15 +9,18 @@ const GlossaryCtx = createContext({ terms: [], byId: new Map(), re: null, keyToI
 
 export function GlossaryProvider({ children, onOpenTerm }) {
   const [data, setData] = useState({ categories: [], terms: [] });
-  useEffect(() => { fetchGlossary().then(setData).catch(() => {}); }, []);
+  const [state, setState] = useState("loading");   // loading / ok / error(一覧が空のときに理由を出す)
+  useEffect(() => {
+    fetchGlossary().then((d) => { setData(d); setState("ok"); }).catch(() => setState("error"));
+  }, []);
   const value = useMemo(() => {
     const byId = new Map(data.terms.map((t) => [t.id, t]));
     // 3文字未満の別名(A/B など)は誤検出が多いので印を付けない。長い語から先に当てる
     const keys = data.terms.flatMap((t) => [t.term, ...t.aliases].filter((k) => k.length >= 3).map((k) => [k, t.id]))
       .sort((a, b) => b[0].length - a[0].length);
     const re = keys.length ? new RegExp(keys.map(([k]) => k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|"), "g") : null;
-    return { ...data, byId, re, keyToId: new Map(keys), open: onOpenTerm ?? (() => {}) };
-  }, [data, onOpenTerm]);
+    return { ...data, state, byId, re, keyToId: new Map(keys), open: onOpenTerm ?? (() => {}) };
+  }, [data, state, onOpenTerm]);
   return <GlossaryCtx.Provider value={value}>{children}</GlossaryCtx.Provider>;
 }
 
@@ -79,7 +82,7 @@ export function TermText({ text }) {
 
 /** 用語集の一覧(分類チップと検索つき) */
 export function GlossaryList({ focusId }) {
-  const { categories, terms } = useGlossary();
+  const { categories, terms, state } = useGlossary();
   const [cat, setCat] = useState("");
   const [q, setQ] = useState("");
   useEffect(() => {
@@ -112,7 +115,9 @@ export function GlossaryList({ focusId }) {
             <p className="mt-1 text-[13px] leading-relaxed text-slate-400">{t.detail}</p>
           </article>
         ))}
-        {!list.length && <p className="text-[13px] text-slate-400">該当なし</p>}
+        {state === "loading" && <p role="status" className="text-[13px] text-slate-400">読み込んでいます…</p>}
+        {state === "error" && <p role="alert" className="text-[13px] text-red-400">用語集を読み込めませんでした。サーバーが動いているか確認して、この画面を開き直してください</p>}
+        {state === "ok" && !list.length && <p className="text-[13px] text-slate-400">該当なし</p>}
       </div>
     </div>
   );

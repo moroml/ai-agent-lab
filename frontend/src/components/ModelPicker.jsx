@@ -160,12 +160,15 @@ function PullButton({ tag, onDone }) {
 
   useEffect(() => {
     if (!running) return undefined;
+    let misses = 0;   // 30秒続けて状態が取れなければ失敗として止める(押せないまま回り続けるのを避ける)
+    const miss = (why) => { if (++misses >= 15) setSt({ status: "error", error: why }); };
     const t = setInterval(() => fetchSystemStatus().then((d) => {
       const p = d.pulls?.[tag];
-      if (!p) return;
+      if (!p) return miss("導入の進み具合を取得できません");
+      misses = 0;
       setSt(p);
       if (p.status === "success") onDone?.();
-    }).catch(() => {}), 2000);
+    }).catch(() => miss("サーバーに接続できません")), 2000);
     return () => clearInterval(t);
   }, [running, tag, onDone]);
 
@@ -176,11 +179,14 @@ function PullButton({ tag, onDone }) {
   const pct = st?.total ? Math.floor((st.completed / st.total) * 100) : null;
   if (st?.status === "success") return <span className="text-[11px] text-green-400">導入しました</span>;
   return (
-    <button type="button" onClick={start} disabled={running}
-            title={st?.status === "error" ? st.error : `${tag} をダウンロードして導入します`}
-            className="flex min-h-7 items-center gap-1 rounded-full border border-blue-500/40 px-2 text-[11px] text-blue-200 hover:bg-blue-500/10 disabled:opacity-70">
-      {running ? <Loader2 size={12} className="animate-spin" aria-hidden="true" /> : <Download size={12} aria-hidden="true" />}
-      {running ? (pct !== null ? `導入中 ${pct}%` : "導入中…") : st?.status === "error" ? "失敗・再試行" : "導入"}
-    </button>
+    <span className="flex flex-wrap items-center gap-1.5">
+      <button type="button" onClick={start} disabled={running} title={`${tag} をダウンロードして導入します`}
+              className="flex min-h-7 items-center gap-1 rounded-full border border-blue-500/40 px-2 text-[11px] text-blue-200 hover:bg-blue-500/10 disabled:opacity-70">
+        {running ? <Loader2 size={12} className="animate-spin" aria-hidden="true" /> : <Download size={12} aria-hidden="true" />}
+        {running ? (pct !== null ? `導入中 ${pct}%` : "導入中…") : st?.status === "error" ? "再試行" : "導入"}
+      </button>
+      {/* 失敗の理由はツールチップに隠さず横に出す */}
+      {st?.status === "error" && <span role="alert" className="text-[11px] text-red-400">失敗: {st.error}</span>}
+    </span>
   );
 }

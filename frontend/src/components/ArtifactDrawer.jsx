@@ -57,9 +57,11 @@ function FilePreviewBody({ artifact, entry, loading }) {
       <div className="flex items-center gap-1.5 px-3 py-1.5">
         <button
           onClick={() => {
-            navigator.clipboard.writeText(full);
-            setCopied(true);
-            setTimeout(() => setCopied(false), 1500);
+            // 失敗時に「コピー済み」と出さない
+            navigator.clipboard.writeText(full).then(() => {
+              setCopied(true);
+              setTimeout(() => setCopied(false), 1500);
+            }, () => {});
           }}
           className="flex items-center gap-1 rounded-md border border-zinc-700 px-2 py-0.5 text-[11px] text-zinc-400 hover:border-blue-500 hover:text-blue-400"
         >
@@ -322,9 +324,10 @@ export default function ArtifactDrawer({ open, onClose, artifacts, answerNode, r
               <h3 className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">最終レポート</h3>
               <button
                 onClick={() => {
-                  navigator.clipboard.writeText(answerNode.output);
-                  setCopied(true);
-                  setTimeout(() => setCopied(false), 1500);
+                  navigator.clipboard.writeText(answerNode.output).then(() => {
+                    setCopied(true);
+                    setTimeout(() => setCopied(false), 1500);
+                  }, () => {});
                 }}
                 className="flex items-center gap-1 rounded-md border border-zinc-700 px-2 py-0.5 text-[11px] text-zinc-400 hover:border-blue-500 hover:text-blue-400"
               >
@@ -349,7 +352,7 @@ export default function ArtifactDrawer({ open, onClose, artifacts, answerNode, r
         {resumable && (
           <p className="flex items-center gap-1.5 border-t border-zinc-800 pt-4 text-[11px] text-zinc-500">
             <MessageSquarePlus size={12} />
-            修正したいときは、この画面を閉じて下部の「会話で修正する」から指示を送ってください。
+            修正したいときは、この画面を閉じて下部の入力欄から追加の指示を送ってください。
           </p>
         )}
       </div>

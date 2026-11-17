@@ -64,6 +64,10 @@ export default function BenchView({ models, runs, onStart, onCancel, prefill, on
   };
 
   const canSubmit = usableKey(model) && selectedIds.length > 0 && !!suite;
+  // 押せない理由をボタンの横に出す(灰色のまま理由が分からないのを避ける)
+  const blockedWhy = !suite ? (suiteError ? "課題集を読み込めません" : "課題集を読み込んでいます…")
+    : !usableKey(model) ? "使えるモデルを選んでください"
+    : !selectedIds.length ? "課題を1つ以上選んでください" : "";
   const submit = async () => {
     if (!canSubmit || busy) return;
     setBusy(true);
@@ -177,10 +181,11 @@ export default function BenchView({ models, runs, onStart, onCancel, prefill, on
                 className="w-14 rounded border border-slate-700 bg-slate-950 px-1.5 py-1.5 text-slate-200 outline-none focus:border-blue-500"
               />
             </label>
+            {blockedWhy && <span role="status" className="ml-auto text-xs text-amber-400">{blockedWhy}</span>}
             <button
               onClick={submit}
               disabled={busy || !canSubmit}
-              className="ml-auto flex items-center gap-1.5 rounded-md bg-blue-600 px-5 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-500"
+              className={`${blockedWhy ? "" : "ml-auto "}flex items-center gap-1.5 rounded-md bg-blue-600 px-5 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-500`}
             >
               {busy ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
               ベンチ開始

@@ -34,7 +34,7 @@ const SAMPLE_TASKS = [
 export default function App() {
   const [runs, setRuns] = useState([]);
   const [models, setModels] = useState(null);
-  const [health, setHealth] = useState(null);
+  const [health, setHealth] = useState(undefined);   // undefined=取得前 / null=取得失敗
   const [gpu, setGpu] = useState(null);
   // ---- 単一の選択状態(Master-Detail の真実源) ----
   // {kind:"run", id} = そのRunを表示 / {kind:"draft", from} = 新しいタスクの下書き /
@@ -71,9 +71,11 @@ export default function App() {
   }, [runs, state.running]);
 
   // ---- ポーリング(一覧3s / リソース5s) & 1秒tick(経過時間表示用) ----
+  // 取得失敗を「タスクが0件」と見せない。runsError のときは接続できない旨と再試行を出す
+  const [runsError, setRunsError] = useState(false);
   const refreshRuns = useCallback(() => fetchRuns()
-    .then((d) => setRuns(d.runs))
-    .catch(() => {})
+    .then((d) => { setRuns(d.runs); setRunsError(false); })
+    .catch(() => setRunsError(true))
     .finally(() => setRunsLoaded(true)), []);
   const refreshModels = useCallback(() => fetchModels().then(setModels).catch(() => {}), []);
   useEffect(() => {
@@ -83,23 +85,31 @@ export default function App() {
         setRuns(d.runs);
         if (!d.runs.length) setView((v) => (v.kind === "empty" ? { kind: "draft", from: null } : v));
       })
-      .catch(() => {})
+      .catch(() => setRunsError(true))
       .finally(() => setRunsLoaded(true));
     refreshModels();
-    const t1 = setInterval(refreshRuns, 3000);
+    // 裏のタブでは取りに行かない(App は他の種類の画面でも描画されたまま)
+    const t1 = setInterval(() => { if (!document.hidden) refreshRuns(); }, 3000);
     const poll = () => {
       fetchGpu().then(setGpu).catch(() => setGpu(null));
       fetchHealth().then(setHealth).catch(() => setHealth(null));
     };
     poll();
-    const t2 = setInterval(poll, 5000);
+    const t2 = setInterval(() => { if (!document.hidden) poll(); }, 5000);
+    // エンジンの起動・停止・VRAM 解放のあと、接続表示とモデル一覧をすぐ取り直す
+    // (以前は「接続状態」を開くか再読込するまで「未接続」のままだった)
+    const onSystemChanged = () => { refreshModels(); poll(); };
+    window.addEventListener("system-changed", onSystemChanged);
     // 経過時間表示用の1秒 tick は、実行中の Run がある間だけ回す
     // (アイドル時も毎秒ツリー全体が再描画されていた。2026-10-27監査)
     const t3 = setInterval(() => {
       if (anyLiveRef.current && !document.hidden) setNow(Date.now());
     }, 1000);
-    return () => [t1, t2, t3].forEach(clearInterval);
-  }, [refreshRuns]);
+    return () => {
+      [t1, t2, t3].forEach(clearInterval);
+      window.removeEventListener("system-changed", onSystemChanged);
+    };
+  }, [refreshRuns, refreshModels]);
 
   // Runを切り替えたら、前のRunに紐づく画面状態を捨てる
   // (開いたままのログドロワーは別Runのノードを指してしまう)
@@ -384,7 +394,8 @@ export default function App() {
   const handleAbort = () => {
     if (!currentId) return;
     setAborting(true);
-    cancelRun(currentId).catch(notifyError).finally(refreshRuns);
+    // 失敗したら「中断中…」のまま押せなくならないよう戻す(再試行できるように)
+    cancelRun(currentId).catch((e) => { setAborting(false); notifyError(e); }).finally(refreshRuns);
   };
 
   const handleRerun = () => {
@@ -501,6 +512,7 @@ export default function App() {
       <div className="flex min-h-0 flex-1">
         <Sidebar
           runs={runsView}
+          runsError={runsError}
           currentId={currentId}
           drafting={drafting}
           onSelect={selectRun}
@@ -542,7 +554,7 @@ export default function App() {
 
           {connecting && (
             <Suspense fallback={viewFallback}>
-              <ConnectionsView models={models} onRefresh={refreshModels} />
+              <ConnectionsView models={models} onRefresh={() => fetchModels().then(setModels)} />
             </Suspense>
           )}
 
@@ -690,8 +702,16 @@ export default function App() {
           {!drafting && !benching && !insighting && !connecting && !currentRun && (
             <div className="flex h-full flex-col items-center justify-center gap-3 text-slate-400">
               <Inbox size={36} strokeWidth={1.2} />
-              <p className="text-sm">{runsLoaded ? "左の一覧からタスクを選ぶか、新しいタスクを開始してください" : "読み込み中…"}</p>
-              {runsLoaded && (
+              {runsError && !runs.length ? (
+                <div role="alert" className="flex flex-col items-center gap-2 text-sm text-red-300">
+                  サーバーに接続できません。タスク一覧を取得できませんでした
+                  <button type="button" onClick={refreshRuns}
+                          className="rounded-full border border-slate-700 px-3 py-1.5 text-xs text-slate-200 hover:border-slate-500">再試行</button>
+                </div>
+              ) : (
+                <p className="text-sm" role={runsLoaded ? undefined : "status"}>{runsLoaded ? "左の一覧からタスクを選ぶか、新しいタスクを開始してください" : "読み込み中…"}</p>
+              )}
+              {runsLoaded && !runsError && (
               <div className="mt-1 flex flex-wrap items-center justify-center gap-2">
                 {SAMPLE_TASKS.map((s) => (
                   <button

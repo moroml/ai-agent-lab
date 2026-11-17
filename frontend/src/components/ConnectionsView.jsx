@@ -194,13 +194,18 @@ function ApiKeyCard({ models }) {
 
 export default function ConnectionsView({ models, onRefresh }) {
   const [refreshing, setRefreshing] = useState(false);
+  const [checked, setChecked] = useState("");   // 押した結果を見える形で返す(変化が無いと押せたか分からない)
   const catalog = models;
   const list = catalog?.models ?? [];
   const conns = catalog?.connections ?? [];
 
   const handleRefresh = () => {
     setRefreshing(true);
-    Promise.resolve(onRefresh?.()).finally(() => setTimeout(() => setRefreshing(false), 400));
+    setChecked("");
+    Promise.resolve(onRefresh?.())
+      .then(() => setChecked(`${new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", second: "2-digit" })} に確認しました`))
+      .catch((e) => setChecked(`確認できませんでした: ${e?.message ?? e}`))
+      .finally(() => setTimeout(() => setRefreshing(false), 400));
   };
 
   return (
@@ -218,8 +223,9 @@ export default function ConnectionsView({ models, onRefresh }) {
             onClick={handleRefresh}
             className="flex items-center gap-1.5 rounded-lg border border-slate-700 px-3 py-2 text-[13px] text-slate-200 transition-colors hover:border-slate-500 hover:text-white"
           >
-            <RefreshCw size={14} className={refreshing ? "animate-spin" : ""} /> 再確認
+            <RefreshCw size={14} className={refreshing ? "animate-spin" : ""} aria-hidden="true" /> 再確認
           </button>
+          {checked && <p role="status" className="w-full text-right text-xs text-slate-400">{checked}</p>}
         </div>
 
         {!catalog ? (
@@ -305,8 +311,8 @@ export default function ConnectionsView({ models, onRefresh }) {
         <ApiKeyCard models={list} />
 
         <p className="mt-6 text-xs leading-relaxed text-slate-400">
-          APIキーの発行以外の設定はこの画面では行いません。モデルの登録・接続先・表示名（server_name）は models.yaml、
-          Claude API のキーは環境変数 ANTHROPIC_API_KEY で設定します（キーを画面に表示・保存することはありません）。
+          モデルの登録・接続先・表示名（server_name）は models.yaml で設定します。
+          Claude API のキーは、エージェント画面右上のシステム状態（メーターのボタン）を開き、「Claude API キー」から設定できます（キーは画面に表示しません）。
         </p>
       </div>
     </main>

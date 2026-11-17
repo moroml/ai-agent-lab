@@ -75,9 +75,14 @@ export default function SystemStatusPopover({ open, onClose, gpu, health, active
 
       {/* 接続状態 */}
       <div className="flex items-center gap-2 border-t border-zinc-700 pt-2 text-xs">
-        {health?.ollama
-          ? <><Wifi size={13} className="text-green-400" /><span className="text-zinc-400">Ollama 接続中</span></>
-          : <><WifiOff size={13} className="text-red-400" /><span className="font-semibold text-red-400">Ollama 未接続</span></>}
+        {/* 取得前(undefined)を「未接続」と、取得失敗(null)を「確認中」と出さない */}
+        {health === undefined
+          ? <span className="text-zinc-500">Ollama 確認中…</span>
+          : health === null
+            ? <><WifiOff size={13} className="text-red-400" /><span className="font-semibold text-red-400">サーバーに接続できません</span></>
+          : health.ollama
+            ? <><Wifi size={13} className="text-green-400" /><span className="text-zinc-400">Ollama 接続中</span></>
+            : <><WifiOff size={13} className="text-red-400" /><span className="font-semibold text-red-400">Ollama 未接続(左下の「エンジン起動」で起動)</span></>}
       </div>
     </Popover>
   );

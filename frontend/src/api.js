@@ -5,7 +5,9 @@ async function jsonOrThrow(resp) {
     let detail = `HTTP ${resp.status}`;
     try {
       const body = await resp.json();
-      if (body.detail) detail = body.detail;
+      // 422 の detail は配列。そのまま渡すと画面に [object Object] と出る
+      if (body.detail) detail = typeof body.detail === "string" ? body.detail
+        : (Array.isArray(body.detail) ? body.detail.map((d) => d.msg ?? JSON.stringify(d)).join(" / ") : JSON.stringify(body.detail));
     } catch { /* JSONでないエラーボディは無視 */ }
     const err = new Error(detail);
     err.status = resp.status; // 呼び出し側でステータス別分岐(例: 409=解決済み)に使う
