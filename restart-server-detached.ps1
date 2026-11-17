@@ -12,7 +12,9 @@ Get-CimInstance Win32_Process |
   ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 Start-Sleep -Seconds 3
 
-$cmd = 'cmd /c cd /d C:\project\ai-agent-lab && "C:\Users\PC_User\AppData\Local\Programs\Python\Python312\pythonw.exe" server.py >> server.log 2>> server.err.log'
+# conhost --headless: without it the cmd window stays open for the server's lifetime.
+# (ASCII only here: PS 5.1 reads this file as cp932 and a trailing kana can swallow the newline.)
+$cmd = 'C:\Windows\System32\conhost.exe --headless cmd /c cd /d C:\project\ai-agent-lab && "C:\Users\PC_User\AppData\Local\Programs\Python\Python312\pythonw.exe" server.py >> server.log 2>> server.err.log'
 $r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $cmd }
 if ($r.ReturnValue -ne 0) { throw "Win32_Process.Create failed: $($r.ReturnValue)" }
 
