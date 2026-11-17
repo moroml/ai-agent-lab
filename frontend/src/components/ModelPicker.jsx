@@ -186,7 +186,7 @@ function PullButton({ tag, onDone }) {
         {running ? (pct !== null ? `導入中 ${pct}%` : "導入中…") : st?.status === "error" ? "再試行" : "導入"}
       </button>
       {/* 失敗の理由はツールチップに隠さず横に出す */}
-      {st?.status === "error" && <span role="alert" className="text-[11px] text-red-400">失敗: {st.error}</span>}
+      {st?.status === "error" && <span role="alert" className="text-xs text-red-400">失敗: {st.error}</span>}
     </span>
   );
 }

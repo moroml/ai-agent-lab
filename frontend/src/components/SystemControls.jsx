@@ -5,7 +5,7 @@ import {
 } from "../api.js";
 import { fmtGB } from "../derive.js";
 
-const btn = "flex min-h-7 items-center gap-1 rounded-md border px-2 text-[11px] disabled:opacity-40";
+const btn = "flex min-h-7 items-center gap-1 rounded-md border px-2 text-xs disabled:opacity-40";
 const ghost = `${btn} border-zinc-700 text-zinc-300 hover:bg-zinc-800`;
 const danger = `${btn} border-red-500 bg-red-600 font-semibold text-white`;
 
@@ -57,14 +57,14 @@ export default function SystemControls() {
   // 取得前に何も出さないと、開いた直後に中身が後から押し出されて動く。場所を確保して待つ
   if (st === undefined) {
     return (
-      <p className="mb-3 flex items-center gap-1.5 border-t border-zinc-700 pt-2 text-[11px] text-zinc-500" role="status">
+      <p className="mb-3 flex items-center gap-1.5 border-t border-zinc-700 pt-2 text-xs text-zinc-500" role="status">
         <Loader2 size={12} className="animate-spin" aria-hidden="true" /> 操作パネルを読み込んでいます…
       </p>
     );
   }
   if (st === null) {
     return (
-      <div className="mb-3 flex items-center gap-2 border-t border-zinc-700 pt-2 text-[11px] text-red-400" role="alert">
+      <div className="mb-3 flex items-center gap-2 border-t border-zinc-700 pt-2 text-xs text-red-400" role="alert">
         <span className="flex-1">サーバーから状態を取得できませんでした</span>
         <button type="button" onClick={() => { setSt(undefined); load(); }} className={ghost}>
           <RotateCcw size={12} aria-hidden="true" /> 再試行
@@ -94,7 +94,7 @@ export default function SystemControls() {
         </div>
         <ul className="space-y-1">
           {models.map((m) => (
-            <li key={m.name} className="flex items-center gap-2 text-[11px] text-zinc-400">
+            <li key={m.name} className="flex items-center gap-2 text-xs text-zinc-400">
               <span className="min-w-0 flex-1 truncate">{m.name}</span>
               <span className="shrink-0 tabular-nums">{fmtGB(m.size_vram)} GB</span>
               <button type="button" disabled={!!busy} onClick={() => act(`u-${m.name}`, () => freeVram([`ollama:${m.name}`]))}
@@ -104,7 +104,7 @@ export default function SystemControls() {
             </li>
           ))}
           {st.comfy.up && (
-            <li className="flex items-center gap-2 text-[11px] text-zinc-400">
+            <li className="flex items-center gap-2 text-xs text-zinc-400">
               <span className="flex-1">ComfyUI (画像・動画のモデル)</span>
               <button type="button" disabled={!!busy} onClick={() => act("u-comfy", () => freeVram(["comfy"]))} className={ghost}>
                 {icon("u-comfy", Eraser)} 解放
@@ -112,14 +112,14 @@ export default function SystemControls() {
             </li>
           )}
           {st.acestep.up && (
-            <li className="flex items-center gap-2 text-[11px] text-zinc-400">
+            <li className="flex items-center gap-2 text-xs text-zinc-400">
               <span className="flex-1">ACE-Step (音楽)</span>
               <button type="button" disabled={!!busy} onClick={() => act("u-ace", () => freeVram(["acestep"]))} className={ghost}>
                 {icon("u-ace", Power)} 停止
               </button>
             </li>
           )}
-          {!models.length && !st.comfy.up && !st.acestep.up && <li className="text-[11px] text-zinc-500">何も載っていません</li>}
+          {!models.length && !st.comfy.up && !st.acestep.up && <li className="text-xs text-zinc-500">何も載っていません</li>}
         </ul>
       </section>
 
@@ -127,7 +127,7 @@ export default function SystemControls() {
       <section aria-labelledby="sys-svc">
         <h4 id="sys-svc" className="mb-1 text-zinc-300">サービス</h4>
         <ul className="space-y-1">
-          <li className="flex items-center gap-2 text-[11px] text-zinc-400">
+          <li className="flex items-center gap-2 text-xs text-zinc-400">
             <span className={`h-1.5 w-1.5 rounded-full ${st.ollama.up ? "bg-green-400" : "bg-zinc-500"}`} aria-hidden="true" />
             <span className="flex-1">Ollama ({st.ollama.up ? "稼働中" : "停止中"})</span>
             {st.ollama.up ? (
@@ -140,7 +140,7 @@ export default function SystemControls() {
             )}
           </li>
           {services.map((s) => (
-            <li key={s.id} className="flex items-center gap-2 text-[11px] text-zinc-400">
+            <li key={s.id} className="flex items-center gap-2 text-xs text-zinc-400">
               <span className={`h-1.5 w-1.5 rounded-full ${s.up ? "bg-green-400" : "bg-zinc-500"}`} aria-hidden="true" />
               <span className="flex-1">{s.label} ({s.up ? "稼働中" : "停止中"})</span>
               {!s.up && (
@@ -154,7 +154,7 @@ export default function SystemControls() {
           ))}
         </ul>
         {services.some((s) => !s.up && s.why) && (
-          <p className="mt-1 text-[11px] text-amber-400">{services.filter((s) => !s.up && s.why).map((s) => s.why).join(" / ")}</p>
+          <p className="mt-1 text-xs text-amber-400">{services.filter((s) => !s.up && s.why).map((s) => s.why).join(" / ")}</p>
         )}
       </section>
 
@@ -184,13 +184,13 @@ export default function SystemControls() {
             <label htmlFor="sys-key-input" className="sr-only">Claude API キー</label>
             <input id="sys-key-input" type="password" autoComplete="off" value={key} onChange={(e) => setKey(e.target.value)}
                    placeholder="sk-ant-…"
-                   className="min-h-7 min-w-0 flex-1 rounded-md border border-zinc-700 bg-zinc-900 px-2 text-[11px] text-zinc-100" />
+                   className="min-h-7 min-w-0 flex-1 rounded-md border border-zinc-700 bg-zinc-900 px-2 text-xs text-zinc-100" />
             <button type="submit" disabled={!!busy} className={ghost}>{icon("key", KeyRound)} 保存</button>
           </form>
         )}
       </section>
 
-      {msg.text && <p role="status" className={`text-[11px] ${msg.error ? "text-red-400" : "text-green-400"}`}>{msg.text}</p>}
+      {msg.text && <p role="status" className={`text-xs ${msg.error ? "text-red-400" : "text-green-400"}`}>{msg.text}</p>}
     </div>
   );
 }
