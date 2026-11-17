@@ -1,5 +1,6 @@
 import { Zap, MemoryStick, Hourglass, WifiOff, Wifi } from "lucide-react";
 import Popover from "./Popover.jsx";
+import EngineControls from "./EngineControls.jsx";
 import { fmtGB } from "../derive.js";
 
 /**
@@ -74,6 +75,9 @@ export default function SystemStatusPopover({ open, onClose, gpu, health, active
           {queueCount} 件
         </span>
       </div>
+
+      {/* 推論エンジン(Strata 等)。モデル選択を閉じた後でもここから止められる */}
+      <EngineControls className="mb-3" />
 
       {/* 接続状態 */}
       <div className="flex items-center gap-2 border-t border-zinc-700 pt-2 text-xs">

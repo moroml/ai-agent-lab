@@ -10,10 +10,10 @@ const STATE = {
 
 /**
  * 選択中サーバーの推論エンジン(models.yaml の engines)を起動・停止する。
- * baseUrls はそのサーバーのモデルの接続先。起動中は数秒ごとに状態を見直し、
+ * baseUrls はそのサーバーのモデルの接続先(省略時は全エンジン)。起動中は数秒ごとに状態を見直し、
  * 状態が変わったら onChanged でモデル一覧(使えるか)を取り直させる。
  */
-export default function EngineControls({ baseUrls, onChanged }) {
+export default function EngineControls({ baseUrls, onChanged, className = "mt-2" }) {
   const [engines, setEngines] = useState([]);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
@@ -24,13 +24,13 @@ export default function EngineControls({ baseUrls, onChanged }) {
 
   const load = useCallback(() => fetchEngines()
     .then((d) => {
-      const mine = d.engines.filter((e) => baseUrls.includes(e.base_url));
+      const mine = baseUrls ? d.engines.filter((e) => baseUrls.includes(e.base_url)) : d.engines;
       const sig = mine.map((e) => e.state).join();
       if (prev.current && prev.current !== sig) changedRef.current?.();
       prev.current = sig;
       setEngines(mine);
     })
-    .catch(() => setEngines([])), [baseUrls.join()]); // eslint-disable-line react-hooks/exhaustive-deps
+    .catch(() => setEngines([])), [baseUrls?.join()]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { load(); }, [load]);
   const starting = engines.some((e) => e.state === "starting");
@@ -60,7 +60,7 @@ export default function EngineControls({ baseUrls, onChanged }) {
   };
 
   return (
-    <div className="mt-2 space-y-1.5 rounded-lg border border-slate-800 bg-slate-950/60 p-2">
+    <div className={`${className} space-y-1.5 rounded-lg border border-slate-800 bg-slate-950/60 p-2`}>
       {engines.map((e) => {
         const st = STATE[e.state] ?? STATE.stopped;
         const working = busy === e.name;
