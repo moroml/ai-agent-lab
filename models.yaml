@@ -423,6 +423,25 @@ models:
     strengths: [coding, reasoning, tool]
     for: "Qwen3.8-27B派生。高品質・要RAM"
     use: "Dirk-Qwen3.8-27B(qwen35 dense) / q4_K_S 16GB・hybrid / tools・thinking / 未ベンチ=probation"
+  uncensored:
+    tag: "huihui_ai/qwen3.8-abliterated:27b-q4_K_M"   # pro の拒否除去(abliterated)版。第三者(huihui_ai)配布
+    family: qwen35
+    tier: external       # 2026-11-17登録。自動ルーティングには載せず、明示指定(model=uncensored / UI選択)でのみ使う。
+                         # archive にすると hub のチャット選択肢からも消えるため external にしている
+    placement: hybrid        # 16.5GB(pro と同じ Q4_K_M + vision projector)
+    ram_gb: 6
+    tools: true              # ollama show: tools/thinking/vision(tool-call疎通は未実測)
+    mtp: true                # draft_num_predict 4 が焼き込み済み(ollama show Parameters)
+    num_ctx: 16384
+    keep_alive: "10m"
+    options: {temperature: 1.0, top_p: 0.95, top_k: 20, min_p: 0, presence_penalty: 0, repeat_penalty: 1.0}
+    options_no_think: {temperature: 0.7, top_p: 0.8, top_k: 20, min_p: 0, presence_penalty: 1.5, repeat_penalty: 1.0}
+    think: "low"
+    strengths: [chat, reasoning, coding, tool]
+    for: "Qwen3.8-27B 無検閲版。明示指定のみ"
+    use: "Qwen3.8-27B abliterated(qwen35 dense) / Q4_K_M 16.5GB・hybrid / think=False 実測(2026-11-17):
+      短文21.2・350トークン14.1 tok/s、初回ロード36秒。pro が拒否した質問(錠前ピッキング)に回答 /
+      回答の正確さは未評価(訳語の乱れあり) / tools・think有りは未実測"
   ornith35:
     tag: "ornith:1.5-35b"           # = hf.co/ornith-ai/Ornith-1.5-35B-A3B-GGUF(別名)
     family: qwen35
