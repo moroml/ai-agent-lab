@@ -5,6 +5,17 @@ import {
 import SystemStatusPopover from "./SystemStatusPopover.jsx";
 import { serverDisplayName, shortBaseUrl } from "../derive.js";
 
+function groupConnections(connections) {
+  const groups = new Map();
+  for (const c of connections) {
+    const name = c.kind === "anthropic" ? "Claude API"
+      : c.kind === "ollama" ? "Ollama" : serverDisplayName(c.server_name || c.name, c.base_url);
+    if (!groups.has(name)) groups.set(name, { name, kind: c.kind, items: [] });
+    groups.get(name).items.push(c);
+  }
+  return [...groups.values()];
+}
+
 /**
  * トップヘッダー。常設は「ロゴ / ステータスピル」だけに絞り、
  * 要対応のもの(OOM・Ollama未接続・承認待ち・全停止)は条件を満たすときだけ出す。
@@ -64,10 +75,18 @@ function Header({
       </button>
 
       <div className="hidden min-w-0 flex-nowrap items-center gap-2 overflow-hidden md:flex">
-        {connections.map((c, i) => {
-          const ok = c.kind === "anthropic" ? c.key_set : c.reachable;
-          const label = c.kind === "anthropic" ? `Claude API キー${ok ? "設定済み" : "未設定"}` : `${c.kind === "ollama" ? "Ollama" : serverDisplayName(c.server_name || c.name, c.base_url)} ${ok ? "接続OK" : "未接続"}`;
-          return <span key={`${c.kind}:${c.base_url}:${i}`} title={`接続先 ${shortBaseUrl(c.base_url)}`} className="flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-800/60 px-3 py-1.5 text-xs text-slate-200"><span className={`h-2 w-2 rounded-full ${ok ? "bg-green-400" : "bg-red-400"}`} />{label}</span>;
+        {groupConnections(connections).map(({ name, kind, items }) => {
+          // 同じサーバー(例: Strata の 8080/8082/8083)は1つにまとめ、ポートはツールチップで見せる
+          const oks = items.map((c) => (kind === "anthropic" ? c.key_set : c.reachable));
+          const n = oks.filter(Boolean).length;
+          const ok = n === items.length;
+          const state = kind === "anthropic" ? `キー${ok ? "設定済み" : "未設定"}`
+            : ok ? "接続OK" : n ? `${n}/${items.length} 接続` : "未接続";
+          return (
+            <span key={`${kind}:${name}`} title={`接続先 ${items.map((c) => shortBaseUrl(c.base_url)).join(", ")}`} className="flex shrink-0 items-center gap-2 whitespace-nowrap rounded-xl border border-slate-700 bg-slate-800/60 px-3 py-1.5 text-xs text-slate-200">
+              <span className={`h-2 w-2 rounded-full ${ok ? "bg-green-400" : n ? "bg-amber-400" : "bg-red-400"}`} />{name} {state}
+            </span>
+          );
         })}
       </div>
       {/* 要対応バッジ群(条件を満たすときだけ現れる) */}
