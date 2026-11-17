@@ -26,6 +26,7 @@ import answer_cache
 import bench
 import openai_api
 import claude_review
+import engines
 import hub
 import api_review
 import llm
@@ -42,6 +43,7 @@ app = FastAPI(title="AI Agent Lab")
 openai_api.register(app)
 # 種類別ワークスペース (チャット / 画像 / 動画 / 音楽) — hub.py 参照
 hub.register(app)
+engines.register(app)   # Strata 等の推論エンジンの起動・停止
 
 
 @app.on_event("startup")

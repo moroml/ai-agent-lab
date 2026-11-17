@@ -530,6 +530,7 @@ export default function App() {
               suggestions={suggestions}
               runs={taskInputRuns}
               onSelectRun={selectRun}
+              onModelsChanged={refreshModels}
             />
           </div>
 

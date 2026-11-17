@@ -80,3 +80,10 @@ const postModel = (url, model) =>
 // model を渡すとそのモデル専用キー(要求はそのモデルに固定される)
 export const generateApiKey = (model = "") => postModel("/api-key/generate", model);
 export const revokeModelKey = (model) => postModel("/api-key/revoke", model);
+
+// 接続先サーバーの推論エンジン(Strata 等)の起動・停止(engines.py)
+export const fetchEngines = () => fetch("/engines", { cache: "no-store" }).then(jsonOrThrow);
+export const startEngine = (name) =>
+  fetch(`/engines/${encodeURIComponent(name)}/start`, { method: "POST" }).then(jsonOrThrow);
+export const stopEngine = (name) =>
+  fetch(`/engines/${encodeURIComponent(name)}/stop`, { method: "POST" }).then(jsonOrThrow);

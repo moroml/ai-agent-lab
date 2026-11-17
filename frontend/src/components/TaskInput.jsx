@@ -20,7 +20,7 @@ const DEFAULTS = { model: "auto", critique: false, approve: true, maxIter: 18, a
  * onCancel: 下書きをやめて直前のRunへ戻る(戻り先が無ければ App が null を渡す)
  * suggestions: 空欄時に出す開始チップ [{emoji?, text}](直近タスク+サンプル)
  */
-function TaskInput({ models, onStart, prefill, onCancel, visible, suggestions = [], runs = [], onSelectRun }) {
+function TaskInput({ models, onStart, prefill, onCancel, visible, suggestions = [], runs = [], onSelectRun, onModelsChanged }) {
   const [task, setTask] = useState("");
   const taskRef = useRef(null);
   const [model, setModel] = useState(DEFAULTS.model);
@@ -170,6 +170,7 @@ function TaskInput({ models, onStart, prefill, onCancel, visible, suggestions = 
             models={modelOptions}
             value={model}
             onChange={setModel}
+            onEnginesChanged={onModelsChanged}
             extraOptions={[{ value: "auto", label: "auto（自動選択）", title: "使うモデル。auto ならタスク内容に合わせて自動で選ばれる" }]}
             describe={(m) => {
               // RAM併用モデルは、トグルOFF・空きRAM不足なら選ばせない。

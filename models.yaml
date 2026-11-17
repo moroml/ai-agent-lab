@@ -617,6 +617,21 @@ critique_pairs:
   heavy: reasoner
   reasoner: worker
 
+# 接続先サーバーの推論エンジン (engines.py)。画面の「起動」で task (Windows のタスク) を走らせる。
+# base_url は models の base_url と同じ値にする。同じ group は同時に動かさない (VRAM/RAM を取り合うため)。
+# 起動前に Ollama のモデルを VRAM から降ろす。8080 の Qwen3.8 Flash Next は起動手段 (プリセット) が無いので未登録
+engines:
+  - name: strata-ds41
+    label: "Strata DeepSeek V4.1 Flash"
+    base_url: "http://127.0.0.1:8082/v1"
+    task: StrataDS41Serve        # C:\Strata\serve-ds41.cmd (ログ C:\Strata\serve-task.log)
+    group: strata-ds41
+  - name: strata-ds41-q
+    label: "Strata DeepSeek V4.1 Flash 品質版"
+    base_url: "http://127.0.0.1:8083/v1"
+    task: StrataDS41ServeQ       # C:\Strata\serve-ds41-q.cmd (ログ C:\Strata\serve-task-q.log)
+    group: strata-ds41
+
 # Opt-in impl-plan transport; legacy config remains for rollback.
 impl_plan_review:
   model_key: impl-plan-review

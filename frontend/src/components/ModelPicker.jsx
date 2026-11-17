@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { groupByBackend, modelName, shortBaseUrl } from "../derive.js";
+import EngineControls from "./EngineControls.jsx";
 
 /**
  * モデル選択(カード式)。まず接続先サーバーのカード(Ollama / llama-server /
@@ -10,7 +11,7 @@ import { groupByBackend, modelName, shortBaseUrl } from "../derive.js";
  *   { blocked: 選べないか, note: " ※未導入" 等の注記, suffix: "(用途)" 等の補足 }
  * extraOptions は auto / none のような「モデル以外」の選択肢で、チップで出す。
  */
-export default function ModelPicker({ models, value, onChange, extraOptions = [], describe }) {
+export default function ModelPicker({ models, value, onChange, extraOptions = [], describe, onEnginesChanged }) {
   const groups = useMemo(() => groupByBackend(models), [models]);
   const valueGroupKey = groups.find((g) => g.models.some((m) => m.key === value))?.key ?? null;
   const [activeKey, setActiveKey] = useState(valueGroupKey ?? groups[0]?.key ?? null);
@@ -87,6 +88,10 @@ export default function ModelPicker({ models, value, onChange, extraOptions = []
           );
         })}
       </div>
+
+      {active?.backend === "openai" && (
+        <EngineControls baseUrls={[...new Set(active.models.map((m) => m.base_url))]} onChanged={onEnginesChanged} />
+      )}
 
       {/* 選択中サーバーのモデル。用途の説明はツールチップへ回し、今使えないモデルは畳む */}
       {active && (() => {
