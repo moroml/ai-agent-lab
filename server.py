@@ -31,6 +31,7 @@ import hub
 import api_review
 import llm
 import router
+import system
 from artifacts import WORKSPACE as ARTIFACT_DIR
 from orchestrator import (CascadeOrchestrator, CodeOrchestrator, CritiqueOrchestrator,
                           DirectOrchestrator, Orchestrator, SwarmCodeOrchestrator)
@@ -44,6 +45,7 @@ openai_api.register(app)
 # 種類別ワークスペース (チャット / 画像 / 動画 / 音楽) — hub.py 参照
 hub.register(app)
 engines.register(app)   # Strata 等の推論エンジンの起動・停止
+system.register(app)    # VRAM・Ollama・生成系サービス・APIキーを画面から操作
 
 
 @app.on_event("startup")
