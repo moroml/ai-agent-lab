@@ -2,16 +2,14 @@
 
 uvicornサーバーをバックグラウンドスレッドで起動し、
 ネイティブウィンドウ(WebView2)でダッシュボードを表示する。
-Ollamaが未起動なら自動で起動する。
+エンジン(Ollama 等)は起動しない。画面の「エンジン起動」ボタンで立ち上げる。
 
 agent-orchestra の app.py を移植(旧D:ドライブ参照を除去。
 OLLAMA_* 環境変数はシステム/ユーザー環境変数に委ね、ここでは上書きしない)。
 """
 from __future__ import annotations
 
-import os
 import socket
-import subprocess
 import sys
 import threading
 import time
@@ -33,9 +31,6 @@ def log(msg: str) -> None:
         pass
 
 
-OLLAMA_EXE = Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Ollama" / "ollama.exe"
-
-
 def _port_open(port: int, host: str = "127.0.0.1") -> bool:
     with socket.socket() as s:
         s.settimeout(0.5)
@@ -48,33 +43,6 @@ def _free_port(preferred: int = 8765) -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
-
-
-# Ollama の最適化 env(start.ps1 の既定値と同一。2026-10-27監査で共通化)。
-# 起動済みの Ollama には効かない点も start.ps1 と同じで、そちらは警告を出す。
-_OLLAMA_ENV_DEFAULTS = {
-    "OLLAMA_FLASH_ATTENTION": "1",
-    "OLLAMA_KV_CACHE_TYPE": "q8_0",
-    "OLLAMA_NUM_PARALLEL": "2",
-    "OLLAMA_MAX_LOADED_MODELS": "1",
-}
-
-
-def ensure_ollama() -> None:
-    if _port_open(11434):
-        return
-    if not OLLAMA_EXE.exists():
-        return  # UI側の「未接続」表示に任せる
-    for k, v in _OLLAMA_ENV_DEFAULTS.items():
-        os.environ.setdefault(k, v)   # ユーザー設定(setx 等)は上書きしない
-    subprocess.Popen(
-        [str(OLLAMA_EXE), "serve"],
-        creationflags=subprocess.CREATE_NO_WINDOW,
-    )
-    for _ in range(20):
-        if _port_open(11434):
-            return
-        time.sleep(0.5)
 
 
 def start_server(port: int) -> dict:
@@ -123,7 +91,7 @@ body { background:#0d1117; color:#8b949e; font-family:'Segoe UI',sans-serif;
 
 def main() -> None:
     log("=== app start ===")
-    ensure_ollama()
+    # エンジン(Ollama 等)は起動しない。画面ヘッダーの「エンジン起動」で立ち上げる
     log(f"ollama alive: {_port_open(11434)}")
     port = _free_port(8765)
     log(f"port chosen: {port}")

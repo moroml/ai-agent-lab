@@ -1,6 +1,6 @@
-﻿# AI Agent Lab ワンボタン起動: Ollama → サーバ(FastAPI) → ブラウザ。
+﻿# AI Agent Lab の起動: サーバ(FastAPI) → ブラウザ。エンジン(Ollama 等)は画面から起動する。
 #
-# 3つとも「起動していなければ起動する」冪等な作りにしてある(二重起動しない)。
+# どちらも「起動していなければ起動する」冪等な作りにしてある(二重起動しない)。
 # 通常はデスクトップの「AI Agent Lab」ショートカット(start.vbs)から呼ばれるが、
 # 単体でも実行できる:
 #   powershell -ExecutionPolicy Bypass -File start.ps1            # 通常起動
@@ -49,69 +49,14 @@ function Wait-Port([int]$TargetPort, [int]$TimeoutSec, [string]$What) {
 # --- 起動記録をリセット(前回分と混ざると原因を追いにくい) ---
 Set-Content -Path $LogPath -Value ("=== {0} 起動 ===" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')) -Encoding utf8
 
-# --- 1. Ollama -------------------------------------------------------------
-if (Test-Port 11434) {
-    Write-Log '[skip] Ollama は起動済み'
-    # 起動済み Ollama の env は後から変えられない。推奨値がユーザー環境変数
-    # (setx 等の恒常設定)にも無い項目は「最適化が効いていない」可能性が高い
-    # ため、無言で通さず警告する(2026-10-27監査: env既定値は冷間起動時だけ
-    # 適用される作りだった)。
-    $recommended = [ordered]@{
-        'OLLAMA_KV_CACHE_TYPE'     = 'q8_0'
-        'OLLAMA_NUM_PARALLEL'      = '2'
-        'OLLAMA_MAX_LOADED_MODELS' = '1'
-    }
-    $missing = @()
-    foreach ($kv in $recommended.GetEnumerator()) {
-        $cur = [Environment]::GetEnvironmentVariable($kv.Key, 'User')
-        if ($cur -ne $kv.Value) { $missing += $kv.Key }
-    }
-    if ($missing.Count -gt 0) {
-        Write-Log ('[env] warn 起動済み Ollama には最適化 env が未適用の可能性があります: ' + ($missing -join ', '))
-        Write-Log '[env] warn 恒常適用するには PowerShell で次を実行し、Ollama を再起動してください:'
-        foreach ($kv in $recommended.GetEnumerator()) {
-            Write-Log ('[env] warn   setx {0} "{1}"' -f $kv.Key, $kv.Value)
-        }
-    } else {
-        Write-Log '[env] 推奨 env はユーザー環境変数に設定済み(起動済み Ollama へも適用済みの見込み)'
-    }
-} else {
-    $ollama = Join-Path $env:LOCALAPPDATA 'Programs\Ollama\ollama.exe'
-    if (-not (Test-Path $ollama)) {
-        $cmd = Get-Command ollama -ErrorAction SilentlyContinue
-        if ($cmd) { $ollama = $cmd.Source }
-    }
-    if (Test-Path $ollama) {
-        # setx で設定した OLLAMA_* はこのプロセスに載っていないことがある。
-        # ユーザー環境変数から読み直して子プロセスへ確実に引き継ぐ
-        # (KV_CACHE_TYPE / NUM_PARALLEL / MAX_LOADED_MODELS / FLASH_ATTENTION)
-        foreach ($entry in [Environment]::GetEnvironmentVariables('User').GetEnumerator()) {
-            if ($entry.Key -like 'OLLAMA_*') {
-                Set-Item -Path ("Env:" + $entry.Key) -Value $entry.Value
-                Write-Log ("[env] {0}={1}" -f $entry.Key, $entry.Value)
-            }
-        }
-        # README推奨の最適化が未設定なら、この起動で立てる Ollama に限って既定値を補う
-        # (ユーザーが setx 等で設定した値は上書きしない。止めたい項目は setx で明示する)
-        $ollamaDefaults = [ordered]@{
-            'OLLAMA_FLASH_ATTENTION'   = '1'     # q8_0 KV の前提 + プロンプト処理の高速化
-            'OLLAMA_KV_CACHE_TYPE'     = 'q8_0'  # KVキャッシュのメモリ半減 → 溢れ・載せ替え減
-            'OLLAMA_NUM_PARALLEL'      = '2'     # swarm の同一モデル2並列(設計の前提)
-            'OLLAMA_MAX_LOADED_MODELS' = '1'     # VRAM 16GB では常駐1本(スラッシング防止)
-        }
-        foreach ($kv in $ollamaDefaults.GetEnumerator()) {
-            if (-not (Test-Path ("Env:" + $kv.Key))) {
-                Set-Item -Path ("Env:" + $kv.Key) -Value $kv.Value
-                Write-Log ("[env] default {0}={1}" -f $kv.Key, $kv.Value)
-            }
-        }
-        Write-Log "[run] Ollama を起動: $ollama serve"
-        Start-Process -FilePath $ollama -ArgumentList 'serve' -WindowStyle Hidden
-        if (-not (Wait-Port 11434 30 'Ollama')) { }
-    } else {
-        Write-Log '[NG] ollama.exe が見つかりません(UIには「Ollama未接続」と出ます)'
-    }
+# --- 1. エンジンは起動しない ---------------------------------------------------
+# アプリだけを立ち上げる(2026-11-17 ユーザー指示)。Ollama・画像/動画・音楽は
+# 画面ヘッダーの「エンジン起動」からまとめて起動する(system.py の /system/engines/start)。
+# setx で設定した OLLAMA_* をサーバへ引き継ぎ、画面から起動する Ollama に渡す。
+foreach ($entry in [Environment]::GetEnvironmentVariables('User').GetEnumerator()) {
+    if ($entry.Key -like 'OLLAMA_*') { Set-Item -Path ("Env:" + $entry.Key) -Value $entry.Value }
 }
+Write-Log ('[info] Ollama: ' + $(if (Test-Port 11434) { '起動済み' } else { '未起動(画面の「エンジン起動」で起動)' }))
 
 # --- 2. サーバ(FastAPI) ----------------------------------------------------
 if ($Restart -and (Test-Path $PidPath)) {
