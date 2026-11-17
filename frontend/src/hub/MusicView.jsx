@@ -26,6 +26,12 @@ export default function MusicView() {
 
   const [loaded, setLoaded] = useState(false);   // 初回の一覧取得前に「まだありません」と出さない
   const reload = () => musicList().then((d) => setTracks(d.items)).catch((e) => setError(e.message)).finally(() => setLoaded(true));
+  // 画面は隠れても残るので、エンジンの起動・停止のたびに ACE-Step の状態を取り直す
+  useEffect(() => {
+    const refresh = () => musicModels().then((d) => setModels(d.models)).catch(() => {});
+    window.addEventListener("system-changed", refresh);
+    return () => window.removeEventListener("system-changed", refresh);
+  }, []);
   useEffect(() => {
     musicModels().then((d) => setModels(d.models)).catch((e) => setError(e.message));
     fetchCategories().then((c) => setForm((f) => ({ ...f, model: f.model || c.categories?.music?.model || "music", duration: f.duration || c.categories?.music?.duration || 30 }))).catch(() => {});

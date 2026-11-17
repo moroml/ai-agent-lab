@@ -3,7 +3,7 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import { Bot, Clapperboard, Image as ImageIcon, MessageSquare, Music } from "lucide-react";
 import App from "./App.jsx";
-import EngineButton from "./components/EngineButton.jsx";
+import EngineButton, { EngineBanner, EngineToast, useEngines } from "./components/EngineButton.jsx";
 
 // 再ビルド後に開きっぱなしのタブは古い分割ファイル名を読みに行き 404 で白画面になる。1回だけ再読込して新しい版を取る
 const lazyView = (load) => lazy(() => load().catch((e) => {
@@ -48,6 +48,7 @@ export default function Shell() {
     document.title = kind === "agent" ? "ai-agent-lab" : `${KINDS.find((k) => k.id === kind).label} · ai-agent-lab`;
   }, [kind]);
 
+  const eng = useEngines();
   const toVideo = useCallback((item) => { setVideoSource(item); setKind("video"); }, []);
   // 一度開いた画面は隠すだけで残す(切り替えるたびに生成中のジョブの追跡や会話の受信が途切れないように)
   const [visited, setVisited] = useState(() => new Set([kind]));
@@ -67,23 +68,27 @@ export default function Shell() {
             type="button"
             onClick={() => setKind(id)}
             aria-current={kind === id ? "page" : undefined}
-            className={`flex min-h-14 flex-1 flex-col items-center justify-center gap-0.5 rounded-lg px-1 text-[11px] transition md:mx-2 md:flex-none ${kind === id ? active : "text-slate-400 hover:bg-slate-900 hover:text-slate-200"}`}
+            className={`flex min-h-14 flex-1 flex-col items-center justify-center gap-0.5 rounded-lg px-1 text-xs transition md:mx-2 md:flex-none ${kind === id ? active : "text-slate-400 hover:bg-slate-900 hover:text-slate-200"}`}
           >
             <Icon size={20} aria-hidden="true" />
             <span className="leading-tight">{label}</span>
           </button>
         ))}
-        <EngineButton />
+        <EngineButton eng={eng} />
       </nav>
-      <main className="relative min-h-0 min-w-0 flex-1">
-        <div className={kind === "agent" ? "h-full" : "hidden"}>
-          <App />
+      <main className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <EngineBanner eng={eng} kind={kind} />
+        <div className="relative min-h-0 flex-1">
+          <div className={kind === "agent" ? "h-full" : "hidden"}>
+            <App />
+          </div>
+          {pane("chat", <ChatView />)}
+          {pane("image", <ImageView onToVideo={toVideo} />)}
+          {pane("video", <VideoView source={videoSource} onSourceChange={setVideoSource} />)}
+          {pane("music", <MusicView />)}
         </div>
-        {pane("chat", <ChatView />)}
-        {pane("image", <ImageView onToVideo={toVideo} />)}
-        {pane("video", <VideoView source={videoSource} onSourceChange={setVideoSource} />)}
-        {pane("music", <MusicView />)}
       </main>
+      <EngineToast eng={eng} />
     </div>
   );
 }
