@@ -50,16 +50,12 @@ system.register(app)    # VRAM・Ollama・生成系サービス・APIキーを�
 
 @app.on_event("startup")
 async def _startup_prewarm():
-    # サーバ起動直後に default モデルを先読みし、その日の初回タスクの
-    # ロード待ち(17〜65秒)をなくす。無効化は環境変数 AAL_NO_PREWARM=1。
-    import os
-    if os.environ.get("AAL_NO_PREWARM"):
-        return
-    asyncio.create_task(llm.prewarm_default())
+    # アプリの起動ではエンジンを立ち上げない (2026-11-17 ユーザー指示)。default モデルの
+    # 先読みは画面の「エンジン起動」(system.start_all) で行う。
     # cascade 高速モデルの keep-warm: 期限切れ・追い出しで Ollama が
     # 空になったときだけ温め直し、次の cascade の下書きが再ロード待ち
     # (実測最大約120秒) で止まらないようにする。他モデルが載っている
-    # ときは追い出さない (llm.keepwarm_should_load)。
+    # ときは追い出さない (llm.keepwarm_should_load)。エンジン起動までは止めておく。
     asyncio.create_task(llm.keepwarm_fast_model(manager.running_count))
 
 

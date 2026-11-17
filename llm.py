@@ -1151,6 +1151,11 @@ async def loaded_model_tags():
         return []
 
 
+# 画面から「VRAM を空ける」「Ollama を終了」したあとや、アプリだけを起動した直後は
+# 裏で温め直さない (system.py が切り替える)。エンジン起動ボタンで解除する。
+keepwarm_paused = True
+
+
 def keepwarm_should_load(loaded_tags, fast_tag, running):
     """cascade 高速モデルを裏で温め直すべきかの決定的判定。
 
@@ -1176,6 +1181,8 @@ async def keepwarm_fast_model(running_count, interval_sec=600.0):
     while True:
         try:
             await asyncio.sleep(interval_sec)
+            if keepwarm_paused:
+                continue
             cfg = load_config()
             key = cfg.get("cascade_fast_model") or ""
             if not key or key not in cfg.get("models", {}):

@@ -41,6 +41,7 @@ def test_keepwarm_loop_loads_only_when_empty(monkeypatch):
 
     monkeypatch.setattr(llm, "loaded_model_tags", fake_loaded)
     monkeypatch.setattr(llm, "prewarm", fake_prewarm)
+    monkeypatch.setattr(llm, "keepwarm_paused", False)   # エンジン起動後の状態
     monkeypatch.setattr(llm, "load_config",
                         lambda: {"cascade_fast_model": "distill4b",
                                  "models": {"distill4b": {}}})
@@ -61,3 +62,32 @@ def test_keepwarm_loop_loads_only_when_empty(monkeypatch):
     asyncio.run(scenario())
     # 空の間に1回だけ温め、載った後は二度と温めない
     assert calls == ["distill4b"]
+
+
+def test_keepwarm_loop_does_nothing_while_paused(monkeypatch):
+    """アプリだけ起動した直後や「VRAM を空ける」の後は裏で温め直さない。"""
+    calls = []
+
+    async def fake_prewarm(cfg, key):
+        calls.append(key)
+
+    async def fake_loaded():
+        return []
+    monkeypatch.setattr(llm, "keepwarm_paused", True)
+    monkeypatch.setattr(llm, "prewarm", fake_prewarm)
+    monkeypatch.setattr(llm, "loaded_model_tags", fake_loaded)
+    monkeypatch.setattr(llm, "load_config",
+                        lambda: {"cascade_fast_model": "distill4b", "models": {"distill4b": {}}})
+    monkeypatch.setattr(llm, "resolve", lambda cfg, key: {"backend": "ollama", "tag": "t"})
+
+    async def scenario():
+        task = asyncio.create_task(llm.keepwarm_fast_model(lambda: 0, interval_sec=0.01))
+        await asyncio.sleep(0.08)
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    asyncio.run(scenario())
+    assert calls == []
