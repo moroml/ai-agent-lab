@@ -26,8 +26,16 @@ import llm
 
 router = APIRouter(dependencies=[Depends(engines.require_local)])
 ENV_PATH = Path(__file__).with_name(".env")
-OLLAMA_APP = Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Ollama" / "ollama app.exe"
-STUDIO_START = "C:/project/local-gen-studio/start-studio.bat"
+OLLAMA_EXE = Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Ollama" / "ollama.exe"
+# 画面から起動する Ollama に補う最適化 env (ユーザー設定があればそちらを優先。旧 start.ps1 / app.py と同じ値)
+OLLAMA_ENV_DEFAULTS = {
+    "OLLAMA_FLASH_ATTENTION": "1",       # q8_0 KV の前提 + プロンプト処理の高速化
+    "OLLAMA_KV_CACHE_TYPE": "q8_0",      # KV キャッシュのメモリ半減
+    "OLLAMA_NUM_PARALLEL": "2",          # swarm の同一モデル2並列
+    "OLLAMA_MAX_LOADED_MODELS": "1",     # VRAM 16GB では常駐1本
+}
+# Local Gen Studio の部品。start-studio.bat はブラウザまで開くので、部品を直接起動する
+STUDIO_ROOT = Path("C:/project/local-gen-studio")
 _DETACHED = (getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
              | getattr(subprocess, "CREATE_NO_WINDOW", 0))
 _pulls: dict[str, dict] = {}       # tag → {status, completed, total, error}
@@ -47,9 +55,9 @@ async def _up(url: str) -> bool:
         return False
 
 
-def _spawn(args: list[str]) -> None:
+def _spawn(args: list[str], env: dict | None = None) -> None:
     """サーバーの再起動に巻き込まれないよう切り離して起動する。"""
-    subprocess.Popen(args, creationflags=_DETACHED, close_fds=True,
+    subprocess.Popen(args, creationflags=_DETACHED, close_fds=True, env=env,
                      stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
@@ -74,7 +82,7 @@ async def status() -> dict:
         "ollama": {"up": ollama, "models": [
             {"name": m.get("name"), "size_vram": m.get("size_vram", 0)} for m in loaded or []]},
         "comfy": {"up": comfy},
-        "studio": {"up": studio, "startable": Path(_studio_script(cfg)).is_file()},
+        "studio": {"up": studio, "startable": all(p.is_file() for p in _studio_parts(cfg))},
         "acestep": {"up": ace},
         "anthropic_key": llm.anthropic_ready(),
         "agent_running": _agent_running(),
@@ -94,7 +102,9 @@ async def _unload_ollama(names: list[str] | None) -> list[str]:
     async with httpx.AsyncClient(timeout=30, trust_env=False) as client:
         for name in loaded:
             if names is None or name in names:
-                await client.post(f"{llm.OLLAMA_BASE}/api/generate", json={"model": name, "keep_alive": 0})
+                r = await client.post(f"{llm.OLLAMA_BASE}/api/generate", json={"model": name, "keep_alive": 0})
+                if r.status_code != 200:
+                    raise HTTPException(502, f"Ollama から {name} を降ろせません (HTTP {r.status_code})")
                 done.append(f"Ollama から {name} を降ろしました")
     return done
 
@@ -109,6 +119,7 @@ async def free_vram(req: FreeReq) -> dict:
         raise HTTPException(409, "エージェントの実行中はモデルを降ろせません。先にタスクを止めてください")
     done = []
     if "ollama" in targets or picked:
+        llm.keepwarm_paused = True   # 空けた直後に裏で温め直さない
         done += await _unload_ollama(None if "ollama" in targets else picked)
     if "comfy" in targets:
         try:
@@ -116,8 +127,10 @@ async def free_vram(req: FreeReq) -> dict:
                 q = (await client.get(s["comfy_base"].rstrip("/") + "/queue")).json()
                 if q.get("queue_running") or q.get("queue_pending"):
                     raise HTTPException(409, "画像・動画を生成中です。終わってから空けてください")
-                await client.post(s["comfy_base"].rstrip("/") + "/free",
-                                  json={"unload_models": True, "free_memory": True})
+                r = await client.post(s["comfy_base"].rstrip("/") + "/free",
+                                      json={"unload_models": True, "free_memory": True})
+                if r.status_code != 200:
+                    raise HTTPException(502, f"ComfyUI のモデルを解放できません (HTTP {r.status_code})")
                 done.append("ComfyUI のモデルを解放しました")
         except (httpx.HTTPError, ValueError):
             pass   # 止まっていれば空ける必要はない
@@ -141,10 +154,12 @@ async def free_vram(req: FreeReq) -> dict:
 async def ollama_start() -> dict:
     if await llm.is_alive():
         return {"done": ["Ollama は起動済みです"]}
-    if OLLAMA_APP.is_file():
-        await asyncio.to_thread(_spawn, [str(OLLAMA_APP)])
-    else:
-        await asyncio.to_thread(_spawn, ["ollama", "serve"])
+    env = {**OLLAMA_ENV_DEFAULTS, **os.environ}
+    exe = str(OLLAMA_EXE) if OLLAMA_EXE.is_file() else "ollama"
+    try:
+        await asyncio.to_thread(_spawn, [exe, "serve"], env)
+    except OSError as e:
+        raise HTTPException(404, f"Ollama を起動できません (未導入?): {e}") from e
     for _ in range(30):
         await asyncio.sleep(1)
         if await llm.is_alive():
@@ -156,6 +171,7 @@ async def ollama_start() -> dict:
 async def ollama_stop() -> dict:
     if _agent_running():
         raise HTTPException(409, "エージェントの実行中は Ollama を終了できません。先にタスクを止めてください")
+    llm.keepwarm_paused = True
     procs = await asyncio.to_thread(_ollama_procs)
     for p in procs:
         try:
@@ -175,6 +191,8 @@ async def _pull(tag: str) -> None:
         timeout = httpx.Timeout(None, connect=10)
         async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
             async with client.stream("POST", f"{llm.OLLAMA_BASE}/api/pull", json={"model": tag}) as resp:
+                if resp.status_code != 200:
+                    raise RuntimeError(f"HTTP {resp.status_code}: {(await resp.aread())[:200]!r}")
                 async for line in resp.aiter_lines():
                     if not line.strip():
                         continue
@@ -207,20 +225,25 @@ async def ollama_pull(req: PullReq) -> dict:
 
 
 # ------------------------------------------------------------------ 生成系サービス
-def _studio_script(cfg: dict) -> str:
-    return (cfg.get("studio") or {}).get("start_script") or STUDIO_START
+def _studio_parts(cfg: dict) -> tuple[Path, Path]:
+    root = Path((cfg.get("studio") or {}).get("root") or STUDIO_ROOT)
+    return root / "comfyui" / "run-comfy.bat", root / "app" / "run-app.bat"
 
 
 @router.post("/system/studio/start")
 async def studio_start() -> dict:
     cfg = llm.load_config()
-    if await _up(hub.studio_base(cfg) + "/"):
-        return {"done": ["Local Gen Studio は起動済みです"]}
-    script = _studio_script(cfg)
-    if not Path(script).is_file():
-        raise HTTPException(404, f"起動スクリプトがありません: {script}")
-    await asyncio.to_thread(_spawn, ["cmd", "/c", script])
-    return {"done": ["Local Gen Studio を起動しています (ComfyUI の準備に1〜3分かかります)"]}
+    comfy_bat, app_bat = _studio_parts(cfg)
+    if not (comfy_bat.is_file() and app_bat.is_file()):
+        raise HTTPException(404, f"Local Gen Studio が見つかりません: {comfy_bat.parent.parent}")
+    done = []
+    if not await _up(gpu_switch.settings(cfg)["comfy_base"].rstrip("/") + "/system_stats"):
+        await asyncio.to_thread(_spawn, ["cmd", "/c", str(comfy_bat)])
+        done.append("ComfyUI を起動しています (準備に1〜3分かかります)")
+    if not await _up(hub.studio_base(cfg) + "/"):
+        await asyncio.to_thread(_spawn, ["cmd", "/c", str(app_bat)])
+        done.append("Local Gen Studio のアプリを起動しています")
+    return {"done": done or ["Local Gen Studio は起動済みです"]}
 
 
 @router.post("/system/acestep/start")
@@ -233,6 +256,24 @@ async def acestep_start() -> dict:
     except (OSError, subprocess.SubprocessError) as e:
         raise HTTPException(502, f"ACE-Step を起動できません: {e}") from e
     return {"done": ["ACE-Step を起動しています"]}
+
+
+@router.post("/system/engines/start")
+async def start_all() -> dict:
+    """ワンボタン起動: Ollama → 画像・動画 → 音楽。1つ失敗しても残りは続ける。"""
+    done, failed = [], []
+    for label, fn in (("Ollama", ollama_start), ("画像・動画", studio_start), ("音楽", acestep_start)):
+        try:
+            done += (await fn())["done"]
+        except HTTPException as e:
+            failed.append(f"{label}: {e.detail}")
+    if await llm.is_alive():
+        llm.keepwarm_paused = False
+        task = asyncio.create_task(llm.prewarm_default())   # 初回タスクのロード待ちを先に済ませる
+        _background.add(task)
+        task.add_done_callback(_background.discard)
+        done.append("既定モデルを読み込んでいます")
+    return {"done": done, "failed": failed}
 
 
 # ------------------------------------------------------------------ Claude API キー

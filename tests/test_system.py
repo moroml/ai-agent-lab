@@ -39,6 +39,7 @@ def test_unload_selected_ollama_model(client, monkeypatch):
 
     async def fake_post(self, url, json=None, **kw):
         posted.append(json)
+        return system.httpx.Response(200)
     monkeypatch.setattr(llm, "_ollama_loaded_models", loaded)
     monkeypatch.setattr(system.httpx.AsyncClient, "post", fake_post)
     r = client.post("/system/vram/free", json={"targets": ["ollama:tb:2b"]})
