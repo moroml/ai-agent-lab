@@ -40,8 +40,9 @@ OLLAMA_ENV_DEFAULTS = {
     "OLLAMA_MAX_LOADED_MODELS": "1",     # VRAM 16GB では常駐1本
 }
 STUDIO_ROOT = Path("C:/project/local-gen-studio")
-_DETACHED = (getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-             | getattr(subprocess, "CREATE_NO_WINDOW", 0))
+# DETACHED_PROCESS と併せると CREATE_NO_WINDOW が無視され、bat から起動した python が
+# 別ウィンドウ (Windows Terminal) で開いてしまう。見えないコンソールを持たせて子に引き継がせる
+_DETACHED = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(subprocess, "CREATE_NO_WINDOW", 0)
 SERVICES = {
     "ollama": {"label": "Ollama", "purpose": "チャット・エージェントの言語モデル", "grace": 30},
     "comfy": {"label": "ComfyUI", "purpose": "画像・動画の生成エンジン", "grace": 240},
