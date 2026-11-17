@@ -252,15 +252,22 @@ async def start_run(req: RunRequest) -> dict:
     installed = set(await llm.list_models())
 
     # --- 進め方と成果物形式をメインエージェントに決めさせる -------------------
-    # モデル明示指定 (pinned) のときは OpenAI / Anthropic のモデル選択と同じく
-    # そのモデルの単独実行にし、他モデルによる仕分け自体をしない。
+    # モデル明示指定 (pinned) のときは他モデルを挟まず、仕分けもそのモデル自身が行う。
+    # 以前は一律 direct (文章で1回答える) にしていたため、「ゲーム作って」でも
+    # ファイルを作らずコードを本文に貼って終わっていた (2026-11-17)。
     pinned = router.is_pinned_model(req.model)
     decided_by = "user"
     reason = ""
     mode, deliverable = req.mode, req.deliverable
     if pinned and mode == "auto":
-        mode = router.pinned_mode(mode)
-        decided_by, reason = "pinned", "モデル明示指定のため単独実行"
+        picked = await router.triage(cfg, task, req.model)
+        mode = picked["mode"]
+        if mode == "swarm-code":
+            mode = "code"
+        mode = router.pinned_mode(mode, tools=llm.resolve(cfg, req.model)["tools"])
+        decided_by, reason = "pinned", picked["reason"]
+        if deliverable == "auto" and mode == "code":
+            deliverable = picked["deliverable"] or "auto"
     elif mode == "auto":
         triage_key = next((k for k in TRIAGE_PREFERRED
                            if k in cfg.get("models", {})

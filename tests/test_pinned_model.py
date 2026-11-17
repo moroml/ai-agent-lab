@@ -42,6 +42,13 @@ def test_pinned_mode_auto_becomes_direct():
     assert router.pinned_mode("code") == "code"
 
 
+def test_pinned_mode_build_needs_tools():
+    # ツール非対応のモデルではファイルを作れないので文章回答に落とす
+    assert router.pinned_mode("code", tools=False) == "direct"
+    assert router.pinned_mode("swarm-code", tools=False) == "direct"
+    assert router.pinned_mode("orchestra", tools=False) == "orchestra"
+
+
 def test_maybe_cascade_not_upgraded_when_pinned():
     # 明示した Opus / DeepSeek は高速モデルの下書きに化けない
     assert router.maybe_cascade("direct", "claude-opus", CFG, pinned=True) == "direct"

@@ -494,13 +494,18 @@ def is_pinned_model(req_model) -> bool:
     return bool(req_model) and req_model != "auto"
 
 
-def pinned_mode(req_mode: str) -> str:
-    """モデル明示時の進め方。auto なら direct (そのモデルの単独実行)。
+def pinned_mode(mode: str, tools: bool = True) -> str:
+    """モデル明示時の進め方。mode は明示指定か、固定モデル自身による仕分けの結果。
 
-    進め方まで明示されている場合はそちらを尊重する (呼び出しは固定された
-    モデルだけで行う。maybe_cascade / orchestra_planner / pick_reviewer 参照)。
+    呼び出しは固定されたモデルだけで行う (maybe_cascade / orchestra_planner /
+    pick_reviewer 参照)。仕分けで出た制作は並列分解せず code で単独実行し、
+    ツール非対応のモデルでは作れないので direct に落とす。
     """
-    return "direct" if req_mode == "auto" else req_mode
+    if mode == "auto":
+        return "direct"
+    if mode in ("code", "swarm-code") and not tools:
+        return "direct"
+    return mode
 
 
 def maybe_cascade(mode: str, model: str, cfg, pinned: bool) -> str:
