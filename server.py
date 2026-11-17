@@ -144,7 +144,9 @@ def _ram_error(info: dict, free_ram: float | None) -> str | None:
 async def index() -> FileResponse:
     """新UI(React)がビルド済みならそちらを配信。/legacy で旧UIも残す。"""
     new_ui = STATIC_REACT / "index.html"
-    return FileResponse(new_ui if new_ui.is_file() else STATIC / "index.html")
+    # index.html は毎回再検証させる。キャッシュされると再ビルド後も古い資産を読みに行き、旧UIのままになる
+    return FileResponse(new_ui if new_ui.is_file() else STATIC / "index.html",
+                        headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/legacy")
