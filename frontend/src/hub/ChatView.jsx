@@ -1,21 +1,23 @@
 // チャット: Run を作らない会話専用の画面。会話はこのブラウザに保存する(サーバーには残さない)。
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Brain, Check, Copy, FileText, Loader2, Menu, Plus, RotateCcw, Send, Square, Trash2, Wrench, X } from "lucide-react";
+import { Brain, Check, Copy, FileText, Loader2, Menu, Paperclip, Plus, RotateCcw, Send, Square, Trash2, Wrench, X } from "lucide-react";
 import Markdown from "../components/md.jsx";
 import { backendMeta, modelName } from "../derive.js";
 import { fetchCategories, prewarmChat, streamChat } from "./api.js";
 import { ErrorNote, inputCls, usePersisted } from "./ui.jsx";
+import { AttachBar, DropZone, useAttach, withAttach } from "../components/Attach.jsx";
 
 const TOOL_LABELS = {
   web_search: "Web検索", fetch_url: "ページ取得", write_file: "ファイル作成", edit_file: "ファイル編集",
   read_file: "ファイル読込", list_dir: "一覧", search_files: "ファイル内検索",
 };
-// 次の発言で続きの作業ができるよう、作ったファイル名を履歴の本文に添える(中身は送らない)
-const forModel = ({ role, content, files }) => ({
-  role, content: files?.length ? `${content}
-
-[作成したファイル: ${files.map((f) => f.path).join(", ")}]` : content,
-});
+// 次の発言で続きの作業ができるよう、作ったファイル名を履歴の本文に添える(中身は送らない)。
+// 添付は説明(置き場所と小さいテキストの中身)を本文に足す
+const forModel = ({ role, content, files, attach }) => {
+  let text = withAttach(content, attach && { ready: true, state: attach });
+  if (files?.length) text += `\n\n[作成したファイル: ${files.map((f) => f.path).join(", ")}]`;
+  return { role, content: text };
+};
 
 const newConv = () => ({ id: crypto.randomUUID?.() ?? String(Date.now()), title: "新しい会話", messages: [], updated: Date.now() });
 
@@ -32,6 +34,7 @@ export default function ChatView() {
   const [listOpen, setListOpen] = useState(false);
   const abortRef = useRef(null);
   const endRef = useRef(null);
+  const att = useAttach();
 
   useEffect(() => { fetchCategories().then(setCatalog).catch((e) => setError(e.message)); }, []);
   useEffect(() => { prewarmChat(model).catch(() => { /* 先読み失敗は送信時に改めて表示される */ }); }, [model]);
@@ -78,7 +81,7 @@ export default function ChatView() {
     });
     try {
       await streamChat(
-        { messages: history.map(forModel), model, think, tools, conv: id },
+        { messages: history.map(forModel), model, think, tools, conv: id, attach: history.at(-1)?.attach?.batch ?? null },
         (ev) => {
           if (ev.error) throw new Error(ev.error);
           if (ev.model) update((m) => ({ ...m, model: ev.model, tag: ev.tag }));
@@ -101,10 +104,12 @@ export default function ChatView() {
   }
 
   function submit() {
-    const text = input.trim();
-    if (!text || busy) return;
+    const text = input.trim() || (att.ready ? "添付したファイルを確認してください" : "");
+    if (!text || busy || att.busy) return;
     setInput("");
-    send([...(conv?.messages ?? []).filter((m) => m.content || m.files?.length), { role: "user", content: text }]);
+    const attach = att.ready ? { batch: att.state.batch, files: att.state.files, describe: att.state.describe } : undefined;
+    att.clear();
+    send([...(conv?.messages ?? []).filter((m) => m.content || m.files?.length), { role: "user", content: text, attach }]);
   }
 
   function regenerate() {
@@ -207,9 +212,10 @@ export default function ChatView() {
           </div>
         </div>
 
-        <div className="border-t border-slate-800 p-3">
+        <DropZone att={att} className="border-t border-slate-800 p-3">
           <div className="mx-auto max-w-3xl space-y-2">
             <ErrorNote text={error} onClose={() => setError("")} />
+            <AttachBar att={att} disabled={busy} />
             <div className="flex items-end gap-2">
               <label htmlFor="chat-input" className="sr-only">メッセージ</label>
               <textarea
@@ -226,13 +232,13 @@ export default function ChatView() {
                   <Square size={16} aria-hidden="true" />
                 </button>
               ) : (
-                <button type="button" onClick={submit} disabled={!input.trim()} className="flex min-h-10 min-w-10 items-center justify-center rounded-lg bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-40" aria-label="送信">
+                <button type="button" onClick={submit} disabled={(!input.trim() && !att.ready) || att.busy} className="flex min-h-10 min-w-10 items-center justify-center rounded-lg bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-40" aria-label="送信">
                   <Send size={16} aria-hidden="true" />
                 </button>
               )}
             </div>
           </div>
-        </div>
+        </DropZone>
       </section>
     </div>
   );
@@ -242,7 +248,15 @@ function Message({ m, last, busy, onRegenerate }) {
   if (m.role === "user") {
     return (
       <div className="flex justify-end">
-        <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-sm bg-emerald-700/40 px-4 py-2 text-sm text-slate-100">{m.content}</div>
+        <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-sm bg-emerald-700/40 px-4 py-2 text-sm text-slate-100">
+          {m.content}
+          {m.attach?.files?.length > 0 && (
+            <p className="mt-1 flex items-center gap-1 text-xs text-emerald-200/80">
+              <Paperclip size={12} aria-hidden="true" />
+              添付 {[...new Set(m.attach.files.map((f) => f.path.split("/")[0]))].join("、")}（{m.attach.files.length}件）
+            </p>
+          )}
+        </div>
       </div>
     );
   }

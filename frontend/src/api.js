@@ -102,3 +102,15 @@ export const startStudio = () => postJson("/system/studio/start");
 export const startAcestep = () => postJson("/system/acestep/start");
 export const startAllEngines = () => postJson("/system/engines/start");
 export const setAnthropicKey = (key) => postJson("/system/anthropic-key", { key });
+
+// ---- 添付 (attach.py): ドロップ・選択したファイルの受け渡しと PC 内検索 ----
+export const uploadAttach = (files, batch) => {
+  const fd = new FormData();
+  files.forEach(({ file, path }) => { fd.append("files", file); fd.append("paths", path); });
+  if (batch) fd.append("batch", batch);
+  return fetch("/attach/upload", { method: "POST", body: fd }).then(jsonOrThrow);
+};
+export const attachLocal = (paths, batch) => postJson("/attach/local", { paths, batch });
+export const searchFiles = (q) => fetch(`/attach/search?q=${encodeURIComponent(q)}`).then(jsonOrThrow);
+export const removeAttach = (batch, path) =>
+  fetch(`/attach/${batch}?path=${encodeURIComponent(path)}`, { method: "DELETE" }).then(jsonOrThrow);

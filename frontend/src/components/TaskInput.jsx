@@ -2,6 +2,7 @@ import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { Play, Loader2, X, Sparkles, ChevronRight, History } from "lucide-react";
 import { modelStatusLine, modelStatusNote, RUN_STATUS, fmtElapsed } from "../derive.js";
 import ModelPicker from "./ModelPicker.jsx";
+import { AttachBar, DropZone, useAttach, withAttach } from "./Attach.jsx";
 
 // 進め方(mode)と成果物形式(deliverable)はメインエージェントが自動で決めるため、
 // UIには枠を置かない。ユーザーはタスクとモデルだけ決めればよい。
@@ -34,6 +35,7 @@ function TaskInput({ models, onStart, prefill, onCancel, visible, suggestions = 
   const [inherited, setInherited] = useState(false);  // 設定変更して再実行から来たか
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  const att = useAttach();
 
   // src は Run レコード(snake_case)にも DEFAULTS(camelCase)にも対応する
   const applySettings = (src) => {
@@ -66,16 +68,19 @@ function TaskInput({ models, onStart, prefill, onCancel, visible, suggestions = 
   }, [visible]);
 
   const submit = async () => {
-    if (!task.trim() || busy) return;
+    if (!task.trim() || busy || att.busy) return;
     setBusy(true);
     setError(null);
     try {
       // mode / deliverable は送らない(auto = メインエージェントが決める)
-      await onStart({ task: task.trim(), model, critique, approve,
+      // 添付は Run の作業フォルダ inputs/ に写され、本文には置き場所と小さいテキストの中身が付く
+      await onStart({ task: withAttach(task.trim(), att), attach: att.ready ? att.state.batch : null,
+                      model, critique, approve,
                       max_iter: maxIter, allow_ram: allowRam,
                       claude_review: claudeReview, api_review: apiReview,
                       think: think === "auto" ? null : think === "on" });
       setTask("");   // 実行を開始したら入力を空に戻す(ビュー切替は App 側)
+      att.clear();
       setInherited(false);
     } catch (e) {
       setError(e.message);   // 失敗時は下書きに留まる(入力・設定は保持)
@@ -151,19 +156,22 @@ function TaskInput({ models, onStart, prefill, onCancel, visible, suggestions = 
           </div>
         )}
 
-        <textarea
-          ref={taskRef}
-          aria-label="作りたいもの・調べたいこと"
-          value={task}
-          onChange={(e) => setTask(e.target.value)}
-          onKeyDown={(e) => {
-            // IME変換中は確定のためのEnterなので送信しない
-            if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !e.nativeEvent.isComposing) submit();
-          }}
-          rows={6}
-          placeholder="何を作りますか? / 何を調べますか? (Ctrl+Enterで実行)"
-          className="w-full resize-none rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm leading-relaxed text-slate-100 placeholder-slate-600 outline-none focus:border-blue-500"
-        />
+        <DropZone att={att} className="space-y-2">
+          <textarea
+            ref={taskRef}
+            aria-label="作りたいもの・調べたいこと"
+            value={task}
+            onChange={(e) => setTask(e.target.value)}
+            onKeyDown={(e) => {
+              // IME変換中は確定のためのEnterなので送信しない
+              if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !e.nativeEvent.isComposing) submit();
+            }}
+            rows={6}
+            placeholder="何を作りますか? / 何を調べますか? (Ctrl+Enterで実行・ファイルやフォルダはここへドロップ)"
+            className="w-full resize-none rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm leading-relaxed text-slate-100 placeholder-slate-600 outline-none focus:border-blue-500"
+          />
+          <AttachBar att={att} disabled={busy} />
+        </DropZone>
 
         <div className="mt-3">
           <ModelPicker
@@ -225,7 +233,7 @@ function TaskInput({ models, onStart, prefill, onCancel, visible, suggestions = 
 
           <button
             onClick={submit}
-            disabled={busy || !task.trim()}
+            disabled={busy || att.busy || !task.trim()}
             className="ml-auto flex items-center gap-1.5 rounded-md bg-green-600 px-5 py-2 text-sm font-semibold text-white transition-colors hover:bg-green-500 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-500"
           >
             {busy ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
