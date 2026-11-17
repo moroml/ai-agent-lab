@@ -5,6 +5,7 @@ workspace/
 projects/run_*/
 projects/chat_*/
 projects/bench_*/
+projects/_attach/
 app.log
 launcher.log
 server.log
