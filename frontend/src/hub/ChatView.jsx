@@ -1,10 +1,21 @@
 // チャット: Run を作らない会話専用の画面。会話はこのブラウザに保存する(サーバーには残さない)。
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Brain, Copy, Menu, Plus, RotateCcw, Send, Square, Trash2 } from "lucide-react";
+import { Brain, Check, Copy, FileText, Loader2, Menu, Plus, RotateCcw, Send, Square, Trash2, Wrench, X } from "lucide-react";
 import Markdown from "../components/md.jsx";
 import { backendMeta, modelName } from "../derive.js";
 import { fetchCategories, prewarmChat, streamChat } from "./api.js";
 import { ErrorNote, inputCls, usePersisted } from "./ui.jsx";
+
+const TOOL_LABELS = {
+  web_search: "Web検索", fetch_url: "ページ取得", write_file: "ファイル作成", edit_file: "ファイル編集",
+  read_file: "ファイル読込", list_dir: "一覧", search_files: "ファイル内検索",
+};
+// 次の発言で続きの作業ができるよう、作ったファイル名を履歴の本文に添える(中身は送らない)
+const forModel = ({ role, content, files }) => ({
+  role, content: files?.length ? `${content}
+
+[作成したファイル: ${files.map((f) => f.path).join(", ")}]` : content,
+});
 
 const newConv = () => ({ id: crypto.randomUUID?.() ?? String(Date.now()), title: "新しい会話", messages: [], updated: Date.now() });
 
@@ -13,6 +24,7 @@ export default function ChatView() {
   const [currentId, setCurrentId] = usePersisted("hub.chat.current", null);
   const [model, setModel] = usePersisted("hub.chat.model", "auto");
   const [think, setThink] = usePersisted("hub.chat.think", false);
+  const [tools, setTools] = usePersisted("hub.chat.tools", true);
   const [catalog, setCatalog] = useState(null);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -66,12 +78,15 @@ export default function ChatView() {
     });
     try {
       await streamChat(
-        { messages: history.map(({ role, content }) => ({ role, content })), model, think },
+        { messages: history.map(forModel), model, think, tools, conv: id },
         (ev) => {
           if (ev.error) throw new Error(ev.error);
           if (ev.model) update((m) => ({ ...m, model: ev.model, tag: ev.tag }));
           if (ev.thinking) update((m) => ({ ...m, thinking: m.thinking + ev.thinking }));
           if (ev.content) update((m) => ({ ...m, content: m.content + ev.content }));
+          if (ev.tool) update((m) => ({ ...m, steps: [...(m.steps ?? []), ev.tool] }));
+          if (ev.tool_result) update((m) => ({ ...m, steps: m.steps.map((s) => (s.id === ev.tool_result.id ? { ...s, ...ev.tool_result, done: true } : s)) }));
+          if (ev.file) update((m) => ({ ...m, files: [...(m.files ?? []).filter((f) => f.path !== ev.file.path), ev.file] }));
           if (ev.done) update((m) => ({ ...m, meta: ev.meta }));
         },
         ctrl.signal,
@@ -89,7 +104,7 @@ export default function ChatView() {
     const text = input.trim();
     if (!text || busy) return;
     setInput("");
-    send([...(conv?.messages ?? []).filter((m) => m.content), { role: "user", content: text }]);
+    send([...(conv?.messages ?? []).filter((m) => m.content || m.files?.length), { role: "user", content: text }]);
   }
 
   function regenerate() {
@@ -147,6 +162,15 @@ export default function ChatView() {
           </select>
           <button
             type="button"
+            onClick={() => setTools((v) => !v)}
+            aria-pressed={tools}
+            className={`flex min-h-10 items-center gap-1 rounded-lg border px-2.5 text-xs ${tools ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200" : "border-slate-700 text-slate-400"}`}
+            title="オンでファイル作成・Web検索・ページ取得を実際に行う（ツール対応モデルのみ）"
+          >
+            <Wrench size={14} aria-hidden="true" /> ツール{tools ? "あり" : "なし"}
+          </button>
+          <button
+            type="button"
             onClick={() => setThink((v) => !v)}
             aria-pressed={think}
             className={`flex min-h-10 items-center gap-1 rounded-lg border px-2.5 text-xs ${think ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200" : "border-slate-700 text-slate-400"}`}
@@ -161,7 +185,7 @@ export default function ChatView() {
             {!conv?.messages.length && (
               <div className="pt-16 text-center">
                 <p className="text-lg font-semibold text-slate-100">何でも聞いてください</p>
-                <p className="mt-1 text-sm text-slate-500">ローカルLLMと会話します。作業を任せたいときは「エージェント」へ。</p>
+                <p className="mt-1 text-sm text-slate-500">ローカルLLMと会話します。「ツールあり」ならファイル作成やWeb調査も実際に行います。</p>
               </div>
             )}
             {conv?.messages.map((m, i) => (
@@ -219,6 +243,28 @@ function Message({ m, last, busy, onRegenerate }) {
           <summary className="cursor-pointer select-none">思考過程（{m.thinking.length}字）</summary>
           <p className="mt-2 whitespace-pre-wrap">{m.thinking}</p>
         </details>
+      )}
+      {m.steps?.length > 0 && (
+        <ul className="space-y-1 rounded-lg border border-slate-800 bg-slate-900/50 px-3 py-2 text-xs text-slate-400">
+          {m.steps.map((s) => (
+            <li key={s.id} className="flex items-center gap-2" title={s.summary}>
+              {!s.done ? <Loader2 size={12} className={streaming ? "animate-spin" : ""} aria-hidden="true" />
+                : s.ok ? <Check size={12} className="text-emerald-400" aria-hidden="true" />
+                  : <X size={12} className="text-red-400" aria-hidden="true" />}
+              <span className="shrink-0 text-slate-300">{TOOL_LABELS[s.name] ?? s.name}</span>
+              <span className="truncate">{s.done && !s.ok ? s.summary : s.label}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {m.files?.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {m.files.map((f) => (
+            <a key={f.path} href={f.url} target="_blank" rel="noreferrer" className="flex min-h-8 items-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-2.5 text-xs text-emerald-200 hover:bg-emerald-500/20">
+              <FileText size={13} aria-hidden="true" /> {f.path}
+            </a>
+          ))}
+        </div>
       )}
       {m.content ? <Markdown text={m.content} className="text-sm leading-relaxed text-slate-200" /> : streaming && <p className="soft-pulse text-sm text-slate-500">考え中…</p>}
       {!streaming && (
