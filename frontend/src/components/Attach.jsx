@@ -178,7 +178,7 @@ function SearchBox({ att, onClose }) {
         <Search size={14} className="text-slate-500" aria-hidden="true" />
         <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Escape" && onClose()}
                placeholder="ファイル名・フォルダ名で検索（2文字以上・空白で AND）" aria-label="PC内のファイルを検索"
-               className="min-w-0 flex-1 bg-transparent text-sm text-slate-100 outline-none placeholder:text-slate-500" />
+               className="min-w-0 flex-1 rounded bg-transparent text-sm text-slate-100 outline-none placeholder:text-slate-500 focus-visible:ring-2 focus-visible:ring-teal-500/50" />
         <button type="button" onClick={onClose} className="rounded p-1 text-slate-400 hover:text-slate-100" aria-label="検索を閉じる"><X size={14} aria-hidden="true" /></button>
       </div>
       {state === "loading" && <p role="status" className="mt-2 text-xs text-slate-400">検索しています…</p>}

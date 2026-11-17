@@ -90,17 +90,19 @@ export const startEngine = (name) =>
 export const stopEngine = (name) =>
   fetch(`/engines/${encodeURIComponent(name)}/stop`, { method: "POST" }).then(jsonOrThrow);
 
-// アプリ外でしか出来なかった操作(system.py)。このPCからだけ使える
+// エンジン(サービスとモデル)の操作 (system.py)。このPCからだけ使える
 const postJson = (url, body = {}) =>
   fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(jsonOrThrow);
 export const fetchSystemStatus = () => fetch("/system/status", { cache: "no-store" }).then(jsonOrThrow);
+export const fetchSystemModels = () => fetch("/system/models", { cache: "no-store" }).then(jsonOrThrow);
+export const serviceAction = (id, action) => postJson(`/system/services/${id}/${action}`);   // start / stop / restart
+export const startEngines = (services = []) => postJson("/system/engines/start", { services });
+export const stopEngines = (services = []) => postJson("/system/engines/stop", { services });
+export const loadModel = (tag) => postJson("/system/models/load", { tag });
+export const unloadModel = (tag = "") => postJson("/system/models/unload", { tag });
+export const setAutoload = (enabled) => postJson("/system/autoload", { enabled });
 export const freeVram = (targets = []) => postJson("/system/vram/free", { targets });
-export const startOllama = () => postJson("/system/ollama/start");
-export const stopOllama = () => postJson("/system/ollama/stop");
 export const pullModel = (tag) => postJson("/system/ollama/pull", { tag });
-export const startStudio = () => postJson("/system/studio/start");
-export const startAcestep = () => postJson("/system/acestep/start");
-export const startAllEngines = () => postJson("/system/engines/start");
 export const setAnthropicKey = (key) => postJson("/system/anthropic-key", { key });
 
 // ---- 添付 (attach.py): ドロップ・選択したファイルの受け渡しと PC 内検索 ----

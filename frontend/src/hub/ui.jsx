@@ -1,6 +1,6 @@
 // 種類別ビュー共通の小さな部品。色は種類ごとの accent (Tailwind の色名) で切り替える。
 import { useEffect, useRef, useState } from "react";
-import { startStudio } from "../api.js";
+import { startEngines } from "../api.js";
 import { fetchJob, studioStatus } from "./api.js";
 
 export const ACCENTS = {
@@ -131,17 +131,20 @@ export function StudioStartButton({ className = "mt-3", onReady }) {
   useEffect(() => () => clearTimeout(timer.current), []);
   const start = () => {
     setState({ busy: true, text: "", error: false });
-    startStudio()
+    startEngines(["comfy", "studio"])
       .then((r) => {
+        if (r.failed?.length) return setState({ busy: false, text: r.failed.join(" / "), error: true });
         setState({ busy: true, text: (r.done ?? []).join(" / "), error: false });
         const until = Date.now() + 5 * 60 * 1000;
-        const again = () => { timer.current = setTimeout(poll, 3000); };
+        const again = () => {
+          if (Date.now() < until) timer.current = setTimeout(poll, 3000);
+          else setState({ busy: false, text: "5分待っても準備できませんでした。もう一度押してください", error: true });
+        };
         const poll = () => studioStatus().then((s) => {
           if (s.connected && s.comfy !== false) {
             setState({ busy: false, text: "準備できました", error: false });
             readyRef.current?.();
-          } else if (Date.now() < until) again();
-          else setState({ busy: false, text: "5分待っても準備できませんでした。もう一度押してください", error: true });
+          } else again();
         }).catch(again);
         poll();
       })

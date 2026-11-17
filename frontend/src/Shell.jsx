@@ -3,7 +3,7 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import { Bot, Clapperboard, Image as ImageIcon, MessageSquare, Music } from "lucide-react";
 import App from "./App.jsx";
-import EngineButton, { EngineBanner, EngineToast, useEngines } from "./components/EngineButton.jsx";
+import { EngineBanner, EngineNavButton, EngineToast, useEngines } from "./components/EngineButton.jsx";
 
 // 再ビルド後に開きっぱなしのタブは古い分割ファイル名を読みに行き 404 で白画面になる。1回だけ再読込して新しい版を取る
 const lazyView = (load) => lazy(() => load().catch((e) => {
@@ -18,6 +18,7 @@ const ChatView = lazyView(() => import("./hub/ChatView.jsx"));
 const ImageView = lazyView(() => import("./hub/ImageView.jsx"));
 const VideoView = lazyView(() => import("./hub/VideoView.jsx"));
 const MusicView = lazyView(() => import("./hub/MusicView.jsx"));
+const EnginesView = lazyView(() => import("./components/EnginesView.jsx"));
 
 const KINDS = [
   { id: "chat", label: "チャット", icon: MessageSquare, active: "text-emerald-300 bg-emerald-500/10" },
@@ -26,7 +27,7 @@ const KINDS = [
   { id: "video", label: "動画", icon: Clapperboard, active: "text-rose-300 bg-rose-500/10" },
   { id: "music", label: "音楽", icon: Music, active: "text-amber-300 bg-amber-500/10" },
 ];
-const IDS = new Set(KINDS.map((k) => k.id));
+const IDS = new Set([...KINDS.map((k) => k.id), "engines"]);
 
 function fromHash() {
   const h = window.location.hash.replace(/^#\/?/, "").split("?")[0];
@@ -45,7 +46,7 @@ export default function Shell() {
   useEffect(() => {
     try { localStorage.setItem("hub.kind", kind); } catch { /* 保存不可は無視 */ }
     if (fromHash() !== kind) history.replaceState(null, "", `#${kind}`);
-    document.title = kind === "agent" ? "ai-agent-lab" : `${KINDS.find((k) => k.id === kind).label} · ai-agent-lab`;
+    document.title = kind === "agent" ? "ai-agent-lab" : `${KINDS.find((k) => k.id === kind)?.label ?? "エンジン"} · ai-agent-lab`;
   }, [kind]);
 
   const eng = useEngines();
@@ -74,10 +75,10 @@ export default function Shell() {
             <span className="leading-tight">{label}</span>
           </button>
         ))}
-        <EngineButton eng={eng} />
+        <EngineNavButton eng={eng} active={kind === "engines"} onClick={() => setKind("engines")} />
       </nav>
       <main className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <EngineBanner eng={eng} kind={kind} />
+        <EngineBanner eng={eng} kind={kind} onOpen={() => setKind("engines")} />
         <div className="relative min-h-0 flex-1">
           <div className={kind === "agent" ? "h-full" : "hidden"}>
             <App />
@@ -86,6 +87,7 @@ export default function Shell() {
           {pane("image", <ImageView onToVideo={toVideo} />)}
           {pane("video", <VideoView source={videoSource} onSourceChange={setVideoSource} />)}
           {pane("music", <MusicView />)}
+          {pane("engines", <EnginesView eng={eng} />)}
         </div>
       </main>
       <EngineToast eng={eng} />

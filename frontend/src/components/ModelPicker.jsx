@@ -154,7 +154,7 @@ export default function ModelPicker({ models, value, onChange, extraOptions = []
 }
 
 /** 未導入の Ollama モデルをアプリ内で導入する(ollama pull 相当)。進み具合を2秒ごとに見る。 */
-function PullButton({ tag, onDone }) {
+export function PullButton({ tag, onDone }) {
   const [st, setSt] = useState(null);   // { status, completed, total, error }
   const running = st && !["success", "error"].includes(st.status);
 

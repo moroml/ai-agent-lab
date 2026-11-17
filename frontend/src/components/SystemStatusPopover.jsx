@@ -1,7 +1,6 @@
-import { Zap, MemoryStick, Hourglass, WifiOff, Wifi } from "lucide-react";
+import { Cpu, Zap, MemoryStick, Hourglass, WifiOff, Wifi } from "lucide-react";
 import Popover from "./Popover.jsx";
 import EngineControls from "./EngineControls.jsx";
-import SystemControls from "./SystemControls.jsx";
 import { fmtGB } from "../derive.js";
 
 /**
@@ -44,8 +43,11 @@ export default function SystemStatusPopover({ open, onClose, gpu, health, active
         </div>
       </div>
 
-      {/* VRAM を空ける・サービスの起動終了・APIキー(以前はターミナルが必要だった操作) */}
-      <SystemControls />
+      {/* サービスとモデルの起動・停止はエンジン画面に集約した */}
+      <button type="button" onClick={() => { onClose?.(); window.location.hash = "#engines"; }}
+              className="mb-3 flex min-h-9 w-full items-center justify-center gap-1.5 rounded-lg border border-teal-500/50 bg-teal-500/10 text-xs font-semibold text-teal-200 hover:bg-teal-500/20">
+        <Cpu size={14} aria-hidden="true" /> エンジン画面で起動・停止する
+      </button>
 
       {/* 選択中Runの推論 */}
       <div className="mb-3 flex items-center gap-2 text-xs">
@@ -82,7 +84,7 @@ export default function SystemStatusPopover({ open, onClose, gpu, health, active
             ? <><WifiOff size={13} className="text-red-400" /><span className="font-semibold text-red-400">サーバーに接続できません</span></>
           : health.ollama
             ? <><Wifi size={13} className="text-green-400" /><span className="text-zinc-400">Ollama 接続中</span></>
-            : <><WifiOff size={13} className="text-red-400" /><span className="font-semibold text-red-400">Ollama 未接続(左下の「エンジン起動」で起動)</span></>}
+            : <><WifiOff size={13} className="text-red-400" /><span className="font-semibold text-red-400">Ollama 未接続(左の「エンジン」画面で起動)</span></>}
       </div>
     </Popover>
   );

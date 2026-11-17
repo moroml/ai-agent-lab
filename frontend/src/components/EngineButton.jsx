@@ -1,104 +1,102 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Loader2, Power, X } from "lucide-react";
-import { fetchSystemStatus, startAllEngines } from "../api.js";
+import { Cpu, Loader2, Power, X } from "lucide-react";
+import { fetchSystemStatus, startEngines } from "../api.js";
 
 /**
- * エンジン(Ollama・画像/動画の Local Gen Studio・音楽の ACE-Step)の状態とワンボタン起動。
- * アプリの起動ではエンジンを立ち上げないため、ここからまとめて起動する。
- * 以前はレール下端の灰色ボタンだけで、どこから起動するのか分からなかった(2026-11-17 ユーザー指摘)。
- * いま開いている画面に要るエンジンが止まっていれば、画面上部の帯で起動を促す。
+ * エンジン(Ollama・ComfyUI・Local Gen Studio・ACE-Step)の状態を全画面で共有する。
+ * 操作の本体は「エンジン」画面(EnginesView)。ここはレールの入口・止まっているときの帯・結果の通知だけ。
+ * 2026-11-17 ユーザー指摘: 起動・停止を自分で選べず、モデルも止められず使いにくい → 専用画面へ集約。
  */
 export function useEngines() {
   const [st, setSt] = useState(undefined);   // undefined=確認中 / null=取得失敗
-  const [busy, setBusy] = useState(false);
   const [note, setNote] = useState(null);    // { lines, error }
-
-  // サービスが後から立ち上がった(または落ちた)ときも他の画面に知らせる。起動ボタンの応答後に準備が終わる ComfyUI など
   const sig = useRef(null);
   const load = useCallback(() => fetchSystemStatus().then((s) => {
     setSt(s);
-    const now = [s.ollama.up, s.studio.up, s.comfy.up, s.acestep.up].join();
+    // 後から立ち上がった・落ちたときも各画面に知らせる (起動ボタンの応答後に準備が終わる ComfyUI など)
+    const now = s.services.map((x) => x.state).join();
     if (sig.current !== null && sig.current !== now) window.dispatchEvent(new Event("system-changed"));
     sig.current = now;
   }).catch(() => setSt(null)), []);
+  const starting = !!st?.services?.some((s) => s.state === "starting");
   useEffect(() => {
     load();
-    const t = setInterval(() => { if (!document.hidden) load(); }, busy ? 3000 : 10000);
-    window.addEventListener("system-changed", load);   // 操作パネルなど他の場所での起動・停止も拾う
+    const t = setInterval(() => { if (!document.hidden) load(); }, starting ? 2000 : 8000);
+    window.addEventListener("system-changed", load);
     return () => { clearInterval(t); window.removeEventListener("system-changed", load); };
-  }, [load, busy]);
+  }, [load, starting]);
   useEffect(() => {
     if (!note || note.error) return undefined;   // 失敗は読み終えて閉じるまで残す
     const t = setTimeout(() => setNote(null), 8000);
     return () => clearTimeout(t);
   }, [note]);
 
-  // 画像・動画はアプリと ComfyUI の両方がそろって初めて生成できる
-  const parts = st ? { ollama: st.ollama.up, studio: st.studio.up && st.comfy.up, music: st.acestep.up } : null;
-
-  const start = async () => {
-    setBusy(true);
-    setNote({ lines: ["エンジンを起動しています…"], error: false });
+  /** 操作を実行し、結果を通知に出して全画面に取り直させる。成功で true */
+  const run = useCallback(async (fn, pending = "実行しています…") => {
+    setNote({ lines: [pending], error: false });
     try {
-      const r = await startAllEngines();
-      setNote({ lines: [...r.done, ...r.failed.map((f) => `失敗 ${f}`)], error: r.failed.length > 0 });
+      const r = await fn();
+      const failed = r?.failed ?? [];
+      setNote({ lines: [...(r?.done ?? []), ...failed.map((f) => `失敗 ${f}`)], error: failed.length > 0 });
+      return !failed.length;
     } catch (e) {
       setNote({ lines: [e.message], error: true });
+      return false;
     } finally {
-      setBusy(false);
-      window.dispatchEvent(new Event("system-changed"));   // 接続表示・モデル一覧を取り直させる(load もここで走る)
+      window.dispatchEvent(new Event("system-changed"));
     }
-  };
-  return { st, parts, busy, note, setNote, start };
+  }, []);
+  const byId = Object.fromEntries((st?.services ?? []).map((s) => [s.id, s]));
+  return { st, byId, note, setNote, run, reload: load };
 }
 
-const NAMES = { ollama: "Ollama", studio: "画像・動画", music: "音楽" };
-// 画面ごとに要るエンジン
-export const NEEDS = { agent: ["ollama"], chat: ["ollama"], image: ["studio"], video: ["studio"], music: ["music"] };
+// 画面ごとに要るサービス
+export const NEEDS = { agent: ["ollama"], chat: ["ollama"], image: ["comfy", "studio"], video: ["comfy", "studio"], music: ["acestep"] };
 
-/** レールのボタン。止まっているものがあれば色を付け、何がいくつ動いているかを文字で出す */
-export default function EngineButton({ eng }) {
-  const { st, parts, busy, start } = eng;
-  const keys = Object.keys(NAMES);
-  const upCount = parts ? keys.filter((k) => parts[k]).length : 0;
-  const allUp = !!parts && upCount === keys.length;
-  const summary = st === undefined ? "確認中" : st === null ? "サーバーに接続できません"
-    : keys.map((k) => `${NAMES[k]}: ${parts[k] ? "稼働中" : "停止中"}`).join(" / ");
-  const label = busy ? "起動中…" : st === undefined ? "確認中…" : allUp ? "稼働中" : "エンジン起動";
-  const look = !parts || allUp ? "text-slate-400" : "border border-amber-500/50 bg-amber-500/10 text-amber-200 hover:bg-amber-500/20";
+/** レールの「エンジン」。稼働数と、止まっているものがあるかを色で示す */
+export function EngineNavButton({ eng, active, onClick }) {
+  const list = eng.st?.services ?? [];
+  const up = list.filter((s) => s.state === "up").length;
+  const starting = list.some((s) => s.state === "starting");
+  const dot = !eng.st ? "bg-slate-500" : starting ? "bg-sky-400 animate-pulse" : up === list.length ? "bg-green-400" : up ? "bg-amber-400" : "bg-red-400";
   return (
-    <button
-      type="button"
-      onClick={start}
-      disabled={busy || allUp || !st}
-      aria-label={`${allUp ? "エンジン稼働中" : "エンジンをまとめて起動"}(${summary})`}
-      className={`flex min-h-14 flex-1 flex-col items-center justify-center gap-0.5 rounded-lg px-1 text-xs transition disabled:cursor-default md:mx-2 md:mt-auto md:flex-none ${look}`}
-    >
-      {busy || st === undefined ? <Loader2 size={20} className="animate-spin" aria-hidden="true" /> : <Power size={20} aria-hidden="true" />}
-      <span className="leading-tight">{label}</span>
-      {parts && <span className="text-xs leading-tight tabular-nums opacity-80">{upCount}/{keys.length} 稼働</span>}
+    <button type="button" onClick={onClick} aria-current={active ? "page" : undefined}
+            aria-label={`エンジン(${eng.st ? `${up}/${list.length} 稼働` : "確認中"})`}
+            className={`relative flex min-h-14 flex-1 flex-col items-center justify-center gap-0.5 rounded-lg px-1 text-xs transition md:mx-2 md:mt-auto md:flex-none ${active ? "bg-teal-500/10 text-teal-300" : "text-slate-400 hover:bg-slate-900 hover:text-slate-200"}`}>
+      <Cpu size={20} aria-hidden="true" />
+      <span className="leading-tight">エンジン</span>
+      <span className="text-xs leading-tight tabular-nums opacity-80">{eng.st ? `${up}/${list.length}` : "…"}</span>
+      <span className={`absolute right-2 top-2 h-2 w-2 rounded-full ${dot}`} aria-hidden="true" />
     </button>
   );
 }
 
-/** いま開いている画面に要るエンジンが止まっているときだけ出す帯 */
-export function EngineBanner({ eng, kind }) {
-  const { st, parts, busy, start } = eng;
+/** いま開いている画面に要るサービスが止まっているときだけ出す帯 */
+export function EngineBanner({ eng, kind, onOpen }) {
   const [hidden, setHidden] = useState("");
-  const down = parts ? (NEEDS[kind] ?? []).filter((k) => !parts[k]) : [];
-  const conflict = st?.studio?.conflict;
+  const [busy, setBusy] = useState(false);
+  const down = (NEEDS[kind] ?? []).map((id) => eng.byId[id]).filter((s) => s && s.state !== "up");
   if (!down.length || hidden === kind) return null;
+  const starting = down.every((s) => s.state === "starting");
+  const start = async () => {
+    setBusy(true);
+    await eng.run(() => startEngines(down.map((s) => s.id)), "起動しています…");
+    setBusy(false);
+  };
   return (
     <div role="region" aria-label="エンジンの状態" className="flex flex-wrap items-center gap-2 border-b border-amber-500/30 bg-amber-500/10 px-4 py-2 text-sm text-amber-100">
-      <Power size={16} className="shrink-0 text-amber-300" aria-hidden="true" />
+      {starting ? <Loader2 size={16} className="shrink-0 animate-spin text-sky-300" aria-hidden="true" /> : <Power size={16} className="shrink-0 text-amber-300" aria-hidden="true" />}
       <span className="min-w-0 flex-1">
-        この画面で使う {down.map((k) => NAMES[k]).join("・")} のエンジンが止まっています。
-        {down.includes("studio") && conflict && <span className="text-amber-200/80"> ({conflict} が既定の番号を使用中。起動すると空き番号を使います)</span>}
+        {starting ? `${down.map((s) => s.label).join("・")} を起動しています…` : `この画面で使う ${down.map((s) => s.label).join("・")} が止まっています。`}
       </span>
-      <button type="button" onClick={start} disabled={busy}
-              className="flex min-h-9 items-center gap-1.5 rounded-lg bg-amber-500 px-3 text-sm font-semibold text-slate-950 hover:bg-amber-400 disabled:opacity-60">
-        {busy ? <Loader2 size={14} className="animate-spin" aria-hidden="true" /> : <Power size={14} aria-hidden="true" />}
-        {busy ? "起動しています…" : "エンジンを起動"}
+      {!starting && (
+        <button type="button" onClick={start} disabled={busy}
+                className="flex min-h-9 items-center gap-1.5 rounded-lg bg-amber-500 px-3 text-sm font-semibold text-slate-950 hover:bg-amber-400 disabled:opacity-60">
+          {busy ? <Loader2 size={14} className="animate-spin" aria-hidden="true" /> : <Power size={14} aria-hidden="true" />} 起動
+        </button>
+      )}
+      <button type="button" onClick={onOpen} className="min-h-9 rounded-lg border border-amber-500/40 px-3 text-sm text-amber-100 hover:bg-amber-500/20">
+        エンジン画面
       </button>
       <button type="button" onClick={() => setHidden(kind)} className="rounded p-1 text-amber-300 hover:text-white" aria-label="この案内を閉じる">
         <X size={14} aria-hidden="true" />
@@ -107,7 +105,7 @@ export function EngineBanner({ eng, kind }) {
   );
 }
 
-/** 起動の結果。ツールチップではなく画面下に出す */
+/** 操作の結果。ツールチップではなく画面下に出す */
 export function EngineToast({ eng }) {
   const { note, setNote } = eng;
   return (
