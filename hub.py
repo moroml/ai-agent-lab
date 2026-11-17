@@ -79,13 +79,16 @@ def studio_token(cfg: dict) -> str:
     global _token_cache
     if os.environ.get("LGS_TOKEN"):
         return os.environ["LGS_TOKEN"]
-    path = Path((cfg.get("studio") or {}).get("token_file") or "")
+    name = (cfg.get("studio") or {}).get("token_file")
+    if not name:   # 未設定の Path("") はカレントフォルダを指してしまう
+        return ""
+    path = Path(name)
     try:
         mtime = path.stat().st_mtime
+        if _token_cache is None or _token_cache[1] != mtime:
+            _token_cache = (path.read_text(encoding="utf-8").strip(), mtime)
     except OSError:
         return ""
-    if _token_cache is None or _token_cache[1] != mtime:
-        _token_cache = (path.read_text(encoding="utf-8").strip(), mtime)
     return _token_cache[0]
 
 
