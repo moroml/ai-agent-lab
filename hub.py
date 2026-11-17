@@ -20,6 +20,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
+import chat_agent
 import gpu_switch
 import llm
 import music
@@ -314,6 +315,8 @@ class ChatReq(BaseModel):
     think: bool | None = None
     temperature: float | None = Field(default=None, ge=0.0, le=2.0)
     system: str | None = Field(default=None, max_length=20000)
+    tools: bool | None = None    # ツールを使って作業する (ファイル作成・Web 調査)。None は種類の既定
+    conv: str = Field(default="default", pattern=r"^[A-Za-z0-9-]{1,64}$")   # 作業フォルダ projects/chat_<conv>/
 
 
 @router.post("/hub/chat")
@@ -331,14 +334,21 @@ async def hub_chat(req: ChatReq, request: Request) -> StreamingResponse:
         msgs.insert(0, {"role": "system", "content": system})
     think = req.think if req.think is not None else cat.get("think")
     info = llm.resolve(cfg, key)
+    tool_cfg = cat.get("tools") or {}
+    use_tools = bool(info["tools"] and (req.tools if req.tools is not None else tool_cfg.get("enabled", True)))
 
     async def events():
         started = time.monotonic()
-        yield _sse({"model": key, "tag": info["tag"], "for": info.get("for", "")})
+        yield _sse({"model": key, "tag": info["tag"], "for": info.get("for", ""), "tools": use_tools})
+        if use_tools:
+            stream = chat_agent.run(cfg, key, msgs, subdir=f"chat_{req.conv}", think=think,
+                                    temperature=req.temperature, opts=tool_cfg)
+        else:
+            stream = llm.chat_stream(cfg, key, msgs, temperature=req.temperature,
+                                     num_ctx=cat.get("num_ctx"), think=think,
+                                     num_predict=cat.get("num_predict"))
         try:
-            async for ev in llm.chat_stream(cfg, key, msgs, temperature=req.temperature,
-                                            num_ctx=cat.get("num_ctx"), think=think,
-                                            num_predict=cat.get("num_predict")):
+            async for ev in stream:
                 if ev.get("done"):
                     meta = ev.get("meta") or {}
                     meta["elapsed_sec"] = round(time.monotonic() - started, 2)

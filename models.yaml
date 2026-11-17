@@ -662,6 +662,10 @@ categories:
     num_ctx: 8192
     num_predict: 2048
     history_chars: 24000     # 送る履歴の上限 (古い順に落とす)
+    tools:                   # ツールを使って作業する (chat_agent.py)。画面のスイッチで切替可
+      enabled: true
+      max_steps: 12          # LLM 呼び出しの上限
+      num_predict: 8192      # ファイル全文を書き切れる長さ
     system: 'あなたは日本語で簡潔かつ正確に答えるアシスタントです。不明な点は推測と事実を分けて述べます。'
   agent:
     label: エージェント
