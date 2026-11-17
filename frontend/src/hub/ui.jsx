@@ -1,6 +1,7 @@
 // 種類別ビュー共通の小さな部品。色は種類ごとの accent (Tailwind の色名) で切り替える。
 import { useEffect, useRef, useState } from "react";
-import { fetchJob } from "./api.js";
+import { startStudio } from "../api.js";
+import { fetchJob, studioStatus } from "./api.js";
 
 export const ACCENTS = {
   emerald: { btn: "bg-emerald-600 hover:bg-emerald-500", ring: "focus:ring-emerald-500/50", text: "text-emerald-300", soft: "bg-emerald-500/10 border-emerald-500/30", bar: "bg-emerald-500" },
@@ -76,7 +77,7 @@ export function StudioOffline({ reason }) {
     <div className="rounded-xl border border-slate-700 bg-slate-900/60 p-4 text-sm text-slate-300">
       <p className="font-medium text-slate-100">Local Gen Studio に接続できません</p>
       <p className="mt-1 text-slate-400">{reason}</p>
-      <p className="mt-2 text-xs text-slate-500">起動: C:\project\local-gen-studio\start-studio.bat（ComfyUI 8188 と アプリ 8787）</p>
+      <StudioStartButton />
     </div>
   );
 }
@@ -115,4 +116,34 @@ export function usePersisted(key, initial) {
     try { localStorage.setItem(key, JSON.stringify(v)); } catch { /* 保存不可でも動作は続ける */ }
   }, [key, v]);
   return [v, setV];
+}
+
+/** Local Gen Studio をアプリ内から起動する(以前は start-studio.bat を手で実行していた)。 */
+export function StudioStartButton({ className = "mt-3" }) {
+  const [state, setState] = useState({ busy: false, text: "", error: false });
+  const start = () => {
+    setState({ busy: true, text: "", error: false });
+    startStudio()
+      .then((r) => {
+        setState({ busy: true, text: (r.done ?? []).join(" / "), error: false });
+        // ComfyUI まで準備できたら画面を読み直す (状態は各画面の初回取得でしか見ていないため)
+        const until = Date.now() + 5 * 60 * 1000;
+        const poll = () => studioStatus().then((s) => {
+          if (s.connected && s.comfy !== false) window.location.reload();
+          else if (Date.now() < until) setTimeout(poll, 3000);
+          else setState({ busy: false, text: "5分待っても準備できませんでした。もう一度押すか、LGS のログを確認してください", error: true });
+        }).catch(() => setTimeout(poll, 3000));
+        poll();
+      })
+      .catch((e) => setState({ busy: false, text: e.message, error: true }));
+  };
+  return (
+    <div className={`${className} flex flex-wrap items-center gap-2`}>
+      <button type="button" onClick={start} disabled={state.busy}
+              className="min-h-9 rounded-lg border border-violet-500/40 bg-violet-500/10 px-3 text-xs text-violet-200 hover:bg-violet-500/20 disabled:opacity-50">
+        {state.busy ? "起動しています…" : "Local Gen Studio を起動"}
+      </button>
+      {state.text && <span role="status" className={`text-xs ${state.error ? "text-red-300" : "text-slate-400"}`}>{state.text}</span>}
+    </div>
+  );
 }

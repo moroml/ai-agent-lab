@@ -5,7 +5,7 @@ import {
   cancelJob, enhancePrompt, fetchCategories, generateImage, setFavorite, studioCatalog,
   studioGallery, studioStatus, trashGeneration,
 } from "./api.js";
-import { Button, Chips, ErrorNote, Field, inputCls, Progress, StudioOffline, usePersisted, useStudioJob } from "./ui.jsx";
+import { Button, Chips, ErrorNote, Field, inputCls, Progress, StudioOffline, StudioStartButton, usePersisted, useStudioJob } from "./ui.jsx";
 
 const SIZES = [
   { value: "1:1", label: "1:1", w: 1024, h: 1024 },
@@ -127,7 +127,12 @@ export default function ImageView({ onToVideo }) {
     <div className="flex h-full flex-col overflow-y-auto lg:flex-row lg:overflow-hidden">
       <section className="space-y-4 border-slate-800 p-4 lg:w-[380px] lg:shrink-0 lg:overflow-y-auto lg:border-r">
         <h1 className="flex items-center gap-2 text-base font-semibold text-violet-200"><Sparkles size={18} aria-hidden="true" /> 画像を作る</h1>
-        {status?.comfy === false && <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">ComfyUI(8188) が起動していません。生成するには start-studio.bat で起動してください。</p>}
+        {status?.comfy === false && (
+          <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+            ComfyUI(8188) が起動していません。
+            <StudioStartButton className="mt-2" />
+          </div>
+        )}
 
         {useCases.length > 0 && (
           <Field label="用途">

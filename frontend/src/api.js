@@ -87,3 +87,16 @@ export const startEngine = (name) =>
   fetch(`/engines/${encodeURIComponent(name)}/start`, { method: "POST" }).then(jsonOrThrow);
 export const stopEngine = (name) =>
   fetch(`/engines/${encodeURIComponent(name)}/stop`, { method: "POST" }).then(jsonOrThrow);
+
+// アプリ外でしか出来なかった操作(system.py)。このPCからだけ使える
+const postJson = (url, body = {}) =>
+  fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(jsonOrThrow);
+export const fetchSystemStatus = () => fetch("/system/status", { cache: "no-store" }).then(jsonOrThrow);
+export const freeVram = (targets = []) => postJson("/system/vram/free", { targets });
+export const startOllama = () => postJson("/system/ollama/start");
+export const stopOllama = () => postJson("/system/ollama/stop");
+export const pullModel = (tag) => postJson("/system/ollama/pull", { tag });
+export const startStudio = () => postJson("/system/studio/start");
+export const startAcestep = () => postJson("/system/acestep/start");
+export const startAllEngines = () => postJson("/system/engines/start");
+export const setAnthropicKey = (key) => postJson("/system/anthropic-key", { key });

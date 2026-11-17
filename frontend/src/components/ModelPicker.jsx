@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
+import { Download, Loader2 } from "lucide-react";
+import { fetchSystemStatus, pullModel } from "../api.js";
 import { groupByBackend, modelName, shortBaseUrl } from "../derive.js";
 import EngineControls from "./EngineControls.jsx";
 
@@ -132,12 +134,53 @@ export default function ModelPicker({ models, value, onChange, extraOptions = []
                 >
                   {showBlocked ? "今使えないモデルを隠す" : `今使えないモデル ${blocked.length} 件を表示`}
                 </button>
-                {showBlocked && <div className="mt-2 flex flex-wrap gap-2">{blocked.map(chip)}</div>}
+                {showBlocked && (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {blocked.map((it) => (it.m.backend_status === "not_installed" ? (
+                      <span key={it.m.key} className="flex items-center gap-1">
+                        {chip(it)}
+                        <PullButton tag={it.m.tag} onDone={onEnginesChanged} />
+                      </span>
+                    ) : chip(it)))}
+                  </div>
+                )}
               </div>
             )}
           </div>
         );
       })()}
     </div>
+  );
+}
+
+/** 未導入の Ollama モデルをアプリ内で導入する(ollama pull 相当)。進み具合を2秒ごとに見る。 */
+function PullButton({ tag, onDone }) {
+  const [st, setSt] = useState(null);   // { status, completed, total, error }
+  const running = st && !["success", "error"].includes(st.status);
+
+  useEffect(() => {
+    if (!running) return undefined;
+    const t = setInterval(() => fetchSystemStatus().then((d) => {
+      const p = d.pulls?.[tag];
+      if (!p) return;
+      setSt(p);
+      if (p.status === "success") onDone?.();
+    }).catch(() => {}), 2000);
+    return () => clearInterval(t);
+  }, [running, tag, onDone]);
+
+  const start = () => {
+    setSt({ status: "starting", completed: 0, total: 0, error: "" });
+    pullModel(tag).catch((e) => setSt({ status: "error", error: e.message }));
+  };
+  const pct = st?.total ? Math.floor((st.completed / st.total) * 100) : null;
+  if (st?.status === "success") return <span className="text-[11px] text-green-400">導入しました</span>;
+  return (
+    <button type="button" onClick={start} disabled={running}
+            title={st?.status === "error" ? st.error : `${tag} をダウンロードして導入します`}
+            className="flex min-h-7 items-center gap-1 rounded-full border border-blue-500/40 px-2 text-[11px] text-blue-200 hover:bg-blue-500/10 disabled:opacity-70">
+      {running ? <Loader2 size={12} className="animate-spin" aria-hidden="true" /> : <Download size={12} aria-hidden="true" />}
+      {running ? (pct !== null ? `導入中 ${pct}%` : "導入中…") : st?.status === "error" ? "失敗・再試行" : "導入"}
+    </button>
   );
 }

@@ -3,6 +3,7 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import { Bot, Clapperboard, Image as ImageIcon, MessageSquare, Music } from "lucide-react";
 import App from "./App.jsx";
+import EngineButton from "./components/EngineButton.jsx";
 
 // 再ビルド後に開きっぱなしのタブは古い分割ファイル名を読みに行き 404 で白画面になる。1回だけ再読込して新しい版を取る
 const lazyView = (load) => lazy(() => load().catch((e) => {
@@ -64,6 +65,7 @@ export default function Shell() {
             <span className="leading-tight">{label}</span>
           </button>
         ))}
+        <EngineButton />
       </nav>
       <main className="relative min-h-0 min-w-0 flex-1">
         <div className={kind === "agent" ? "h-full" : "hidden"}>

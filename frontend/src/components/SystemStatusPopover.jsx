@@ -1,6 +1,7 @@
 import { Zap, MemoryStick, Hourglass, WifiOff, Wifi } from "lucide-react";
 import Popover from "./Popover.jsx";
 import EngineControls from "./EngineControls.jsx";
+import SystemControls from "./SystemControls.jsx";
 import { fmtGB } from "../derive.js";
 
 /**
@@ -41,17 +42,10 @@ export default function SystemStatusPopover({ open, onClose, gpu, health, active
             style={{ width: `${Math.min(100, ratio * 100)}%` }}
           />
         </div>
-        {gpu?.models?.length > 0 && (
-          <ul className="mt-1.5 space-y-0.5">
-            {gpu.models.map((m) => (
-              <li key={m.name} className="flex justify-between text-[11px] text-zinc-500">
-                <span className="min-w-0 truncate">{m.name}</span>
-                <span className="shrink-0 tabular-nums">{fmtGB(m.size_vram)} GB</span>
-              </li>
-            ))}
-          </ul>
-        )}
       </div>
+
+      {/* VRAM を空ける・サービスの起動終了・APIキー(以前はターミナルが必要だった操作) */}
+      <SystemControls />
 
       {/* 選択中Runの推論 */}
       <div className="mb-3 flex items-center gap-2 text-xs">
