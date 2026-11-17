@@ -145,6 +145,8 @@ async def upload(files: list[UploadFile] = File(...), paths: list[str] = Form(de
         if SECRET.search(rel.name):
             skipped.append(rel.as_posix())
             continue
+        if f.size is not None and total + f.size > MAX_BYTES:   # 読み込む前に弾く
+            raise HTTPException(413, f"添付は合計 {MAX_FILES} 件・{MAX_BYTES // 2**20}MB までです")
         data = await f.read()
         count, total = count + 1, total + len(data)
         if count > MAX_FILES or total > MAX_BYTES:
