@@ -105,8 +105,8 @@ async def _studio(method: str, path: str, *, json_body=None, timeout: float = 30
         except ValueError:
             detail = None
         if resp.status_code == 401:
-            detail = ("Local Gen Studio に認証を拒否されました。トークン (studio.token_file / LGS_TOKEN) の不一致か、"
-                      "8787 番を別のアプリが使っている可能性があります")
+            detail = ("Local Gen Studio に認証を拒否されました。この番号を別のアプリが使っているか、トークンが一致していません。"
+                      "「Local Gen Studio を起動」を押すと、空いている番号で起動し直します")
         if isinstance(detail, list):   # FastAPI の検証エラー
             detail = "; ".join(str(d.get("msg", d)) for d in detail)
         raise HTTPException(resp.status_code, detail or f"Local Gen Studio: HTTP {resp.status_code}")

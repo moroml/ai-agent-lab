@@ -56,6 +56,34 @@ def test_pull_only_models_in_config(client):
     assert client.post("/system/ollama/pull", json={"tag": "evil/model"}).status_code == 400
 
 
+def test_studio_starts_on_free_port_when_default_taken(client, monkeypatch, tmp_path):
+    root = tmp_path / "lgs"
+    (root / "comfyui").mkdir(parents=True)
+    (root / "app").mkdir()
+    (root / "comfyui" / "run-comfy.bat").write_text("", encoding="utf-8")
+    (root / "app" / "run-app.bat").write_text("set LGS_X=1\n", encoding="utf-8")
+    monkeypatch.setattr(llm, "load_config", lambda *a, **k: {**CFG, "studio": {"root": str(root), "base_url": "http://127.0.0.1:8787"}})
+    monkeypatch.delenv("LGS_BASE", raising=False)
+    spawned = []
+
+    async def up(url):
+        return True   # ComfyUI は起動済み
+    async def studio_up(cfg):
+        return False
+    monkeypatch.setattr(system, "_up", up)
+    monkeypatch.setattr(system, "_studio_up", studio_up)
+    monkeypatch.setattr(system, "_studio_conflict", lambda cfg: "node.exe (PID 1)")
+    monkeypatch.setattr(system, "_free_port", lambda start: start + 1)
+    monkeypatch.setattr(system, "_spawn_studio_app", lambda bat, port: spawned.append(port))
+    r = client.post("/system/studio/start")
+    assert r.status_code == 200
+    assert spawned == [8788]
+    assert "8788" in r.json()["done"][0]
+    assert system.os.environ["LGS_BASE"] == "http://127.0.0.1:8788"
+    assert "LGS_BASE=http://127.0.0.1:8788" in system.ENV_PATH.read_text(encoding="utf-8")
+    monkeypatch.delenv("LGS_BASE")
+
+
 def test_anthropic_key_saved_and_removed(client, monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     (system.ENV_PATH).write_text("OTHER=1\nANTHROPIC_API_KEY=old\n", encoding="utf-8")

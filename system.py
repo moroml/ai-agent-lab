@@ -77,12 +77,13 @@ async def status() -> dict:
     loaded = await llm._ollama_loaded_models()
     ollama, comfy, studio, ace = await asyncio.gather(
         llm.is_alive(), _up(s["comfy_base"].rstrip("/") + "/system_stats"),
-        _up(hub.studio_base(cfg) + "/"), _up(s["acestep_base"].rstrip("/") + "/health"))
+        _studio_up(cfg), _up(s["acestep_base"].rstrip("/") + "/health"))
+    conflict = "" if studio else await asyncio.to_thread(_studio_conflict, cfg)
     return {
         "ollama": {"up": ollama, "models": [
             {"name": m.get("name"), "size_vram": m.get("size_vram", 0)} for m in loaded or []]},
         "comfy": {"up": comfy},
-        "studio": {"up": studio, "startable": all(p.is_file() for p in _studio_parts(cfg))},
+        "studio": {"up": studio, "startable": all(p.is_file() for p in _studio_parts(cfg)), "conflict": conflict},
         "acestep": {"up": ace},
         "anthropic_key": llm.anthropic_ready(),
         "agent_running": _agent_running(),
@@ -230,6 +231,69 @@ def _studio_parts(cfg: dict) -> tuple[Path, Path]:
     return root / "comfyui" / "run-comfy.bat", root / "app" / "run-app.bat"
 
 
+def _port_of(base: str) -> int:
+    return httpx.URL(base).port or 80
+
+
+def _port_owner(port: int) -> psutil.Process | None:
+    try:
+        for c in psutil.net_connections("tcp"):
+            if c.status == psutil.CONN_LISTEN and c.laddr and c.laddr.port == port and c.pid:
+                return psutil.Process(c.pid)
+    except (psutil.Error, OSError):
+        pass
+    return None
+
+
+def _studio_conflict(cfg: dict) -> str:
+    """LGS の番号を別のアプリが使っていればその説明を返す(以前は 401 を「起動済み」と誤判定し、起動もしなかった)。"""
+    p = _port_owner(_port_of(hub.studio_base(cfg)))
+    if p is None:
+        return ""
+    try:
+        cmd = " ".join(p.cmdline())
+        name = p.name()
+    except psutil.Error:
+        return ""
+    if "local-gen-studio" in cmd.lower().replace("\\", "/"):
+        return ""
+    return f"{name} (PID {p.pid})"
+
+
+async def _studio_up(cfg: dict) -> bool:
+    """LGS 本体が応答し、トークンが通るときだけ True。"""
+    try:
+        async with httpx.AsyncClient(timeout=2.5, trust_env=False) as client:
+            r = await client.get(hub.studio_base(cfg) + "/api/status",
+                                 headers={"Authorization": f"Bearer {hub.studio_token(cfg)}"})
+            return r.status_code == 200
+    except httpx.HTTPError:
+        return False
+
+
+def _free_port(start: int) -> int:
+    for port in range(start + 1, start + 40):
+        if _port_owner(port) is None:
+            return port
+    raise HTTPException(409, "Local Gen Studio に使える空き番号が見つかりません")
+
+
+def _spawn_studio_app(app_bat: Path, port: int) -> None:
+    """run-app.bat と同じ環境で、番号だけ変えて LGS のアプリを起動する (LGS 側のファイルは書き換えない)。"""
+    text = app_bat.read_text(encoding="utf-8", errors="replace")
+    env = dict(os.environ)
+    for m in re.finditer(r"(?im)^\s*set\s+([A-Z0-9_]+)=(.*)$", text):
+        env[m.group(1)] = m.group(2).strip()
+    app_dir = app_bat.parent
+    log = app_dir.parent / "_downloads" / "app.log"
+    log.parent.mkdir(exist_ok=True)
+    with open(log, "ab") as out:
+        subprocess.Popen([str(app_dir / ".venv" / "Scripts" / "python.exe"), "-u", "-m", "uvicorn", "main:app",
+                          "--host", "127.0.0.1", "--port", str(port)],
+                         cwd=app_dir, env=env, creationflags=_DETACHED, close_fds=True,
+                         stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT)
+
+
 @router.post("/system/studio/start")
 async def studio_start() -> dict:
     cfg = llm.load_config()
@@ -240,9 +304,20 @@ async def studio_start() -> dict:
     if not await _up(gpu_switch.settings(cfg)["comfy_base"].rstrip("/") + "/system_stats"):
         await asyncio.to_thread(_spawn, ["cmd", "/c", str(comfy_bat)])
         done.append("ComfyUI を起動しています (準備に1〜3分かかります)")
-    if not await _up(hub.studio_base(cfg) + "/"):
-        await asyncio.to_thread(_spawn, ["cmd", "/c", str(app_bat)])
-        done.append("Local Gen Studio のアプリを起動しています")
+    if not await _studio_up(cfg):
+        busy_by = await asyncio.to_thread(_studio_conflict, cfg)
+        if busy_by:
+            # 既定の番号を別のアプリが使っている → 空き番号で起動し、以後はそちらへつなぐ(.env に残す)
+            base = hub.studio_base(cfg)
+            port = await asyncio.to_thread(_free_port, _port_of(base))
+            await asyncio.to_thread(_spawn_studio_app, app_bat, port)
+            new_base = f"http://127.0.0.1:{port}"
+            os.environ["LGS_BASE"] = new_base
+            await asyncio.to_thread(_write_env, "LGS_BASE", new_base)
+            done.append(f"{_port_of(base)} 番を {busy_by} が使っているため、{port} 番で Local Gen Studio を起動しています")
+        else:
+            await asyncio.to_thread(_spawn, ["cmd", "/c", str(app_bat)])
+            done.append("Local Gen Studio のアプリを起動しています")
     return {"done": done or ["Local Gen Studio は起動済みです"]}
 
 
