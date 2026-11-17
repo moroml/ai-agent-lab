@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 /**
  * アンカー直下に開く共通ポップオーバー。層1(1クリックで開く詳細)の共通シェル。
@@ -13,6 +13,26 @@ import { useEffect, useRef } from "react";
 export default function Popover({ open, onClose, align = "right", children, labelledBy, returnFocusRef }) {
   const panelRef = useRef(null);
   const wasOpen = useRef(false);
+  const [pos, setPos] = useState(null);
+
+  // 親(ヘッダー等)が overflow-hidden でも切れないよう、アンカーの位置から fixed で置く
+  useLayoutEffect(() => {
+    if (!open) return undefined;
+    const place = () => {
+      const r = panelRef.current?.parentElement?.getBoundingClientRect();
+      if (!r) return;
+      setPos(align === "right"
+        ? { top: r.bottom + 6, right: Math.max(12, window.innerWidth - r.right) }
+        : { top: r.bottom + 6, left: Math.max(12, r.left) });
+    };
+    place();
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
+    return () => {
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
+    };
+  }, [open, align]);
 
   useEffect(() => {
     if (!open) return;
@@ -58,9 +78,8 @@ export default function Popover({ open, onClose, align = "right", children, labe
       tabIndex={-1}
       role="dialog"
       aria-labelledby={labelledBy}
-      className={`absolute top-full z-50 mt-1.5 w-80 max-w-[calc(100vw-1.5rem)] rounded-xl border border-zinc-700 bg-zinc-800 p-3 text-left shadow-2xl focus:outline-none ${
-        align === "right" ? "right-0" : "left-0"
-      }`}
+      style={pos ?? undefined}
+      className="fixed z-50 max-h-[calc(100vh-5rem)] w-80 max-w-[calc(100vw-1.5rem)] overflow-y-auto rounded-xl border border-zinc-700 bg-zinc-800 p-3 text-left shadow-2xl focus:outline-none"
     >
       {children}
     </div>
