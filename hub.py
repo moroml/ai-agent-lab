@@ -317,6 +317,7 @@ class ChatReq(BaseModel):
     system: str | None = Field(default=None, max_length=20000)
     tools: bool | None = None    # ツールを使って作業する (ファイル作成・Web 調査)。None は種類の既定
     conv: str = Field(default="default", pattern=r"^[A-Za-z0-9-]{1,64}$")   # 作業フォルダ projects/chat_<conv>/
+    attach: str | None = Field(default=None, pattern=r"^[a-f0-9]{12}$")   # attach.py の添付。作業フォルダの inputs/ へ写す
 
 
 @router.post("/hub/chat")
@@ -336,6 +337,10 @@ async def hub_chat(req: ChatReq, request: Request) -> StreamingResponse:
     info = llm.resolve(cfg, key)
     tool_cfg = cat.get("tools") or {}
     use_tools = bool(info["tools"] and (req.tools if req.tools is not None else tool_cfg.get("enabled", True)))
+    if req.attach:
+        import attach
+        from tools import WORKSPACE
+        await asyncio.to_thread(attach.materialize, req.attach, Path(WORKSPACE) / f"chat_{req.conv}")
 
     async def events():
         started = time.monotonic()

@@ -20,7 +20,7 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 import answer_cache
 import bench
@@ -31,6 +31,7 @@ import hub
 import api_review
 import llm
 import router
+import attach
 import system
 from artifacts import WORKSPACE as ARTIFACT_DIR
 from orchestrator import (CascadeOrchestrator, CodeOrchestrator, CritiqueOrchestrator,
@@ -46,6 +47,7 @@ openai_api.register(app)
 hub.register(app)
 engines.register(app)   # Strata 等の推論エンジンの起動・停止
 system.register(app)    # VRAM・Ollama・生成系サービス・APIキーを画面から操作
+attach.register(app)    # ファイル・フォルダの添付 (ドロップ・PC内検索)
 
 
 @app.on_event("startup")
@@ -116,6 +118,7 @@ class RunRequest(BaseModel):
     temperature: float | None = None   # 生成温度の Run 単位上書き (未指定ならモデル既定)
     max_tokens: int | None = None      # 生成上限トークンの Run 単位上書き (同上)
     think: bool | None = None          # 思考生成の Run 単位指定 (None=モデル既定, True=あり, False=なし)
+    attach: str | None = Field(default=None, pattern=r"^[a-f0-9]{12}$")   # attach.py の添付。Run の作業フォルダ inputs/ へ写す
 
 
 def _is_hybrid(cfg, *keys: str) -> bool:
@@ -236,7 +239,9 @@ async def start_run(req: RunRequest) -> dict:
     if req.think is not None:
         gen_override["think"] = req.think
     if not await llm.is_alive():
-        raise HTTPException(503, "Ollamaが起動していません(ollama serve を実行してください)")
+        raise HTTPException(503, "Ollamaが起動していません(左の「エンジン起動」で起動してください)")
+    if req.attach and not (attach.STORE / req.attach).is_dir():
+        raise HTTPException(404, "添付が見つかりません。もう一度添付してください")
     if req.claude_review:
         # 成果物のソースを外部(Anthropic)へ送る工程。使えない状態なら黙って
         # スキップせず、理由を返して気づけるようにする
@@ -329,6 +334,8 @@ async def start_run(req: RunRequest) -> dict:
                          claude_review=claude_on,
                          api_review=req.api_review and mode in ("code", "swarm-code"),
                          gen_override=gen_override, pinned=pinned)
+    if req.attach:
+        await asyncio.to_thread(attach.materialize, req.attach, Path(PROJECTS_DIR) / f"run_{run.id}")
 
     def factory():
         if run.mode == "cascade":
@@ -407,7 +414,7 @@ async def start_bench(req: BenchRequest) -> dict:
     info = llm.resolve(cfg, req.model)
     # Ollama の死活は Ollama バックエンドのモデルをベンチするときだけ要求する
     if info.get("backend", "ollama") == "ollama" and not await llm.is_alive():
-        raise HTTPException(503, "Ollamaが起動していません(ollama serve を実行してください)")
+        raise HTTPException(503, "Ollamaが起動していません(左の「エンジン起動」で起動してください)")
     usable, status = await llm.model_usable(cfg, req.model, installed)
     if not usable:
         raise HTTPException(400, llm.unusable_reason(info, status))
@@ -490,7 +497,7 @@ async def continue_run(run_id: str, req: ContinueRequest) -> dict:
     if manager.get_live(run_id) is not None:
         raise HTTPException(409, "実行中のタスクには追加指示を送れません(完了後に送信してください)")
     if not await llm.is_alive():
-        raise HTTPException(503, "Ollamaが起動していません(ollama serve を実行してください)")
+        raise HTTPException(503, "Ollamaが起動していません(左の「エンジン起動」で起動してください)")
 
     run = manager.reopen(run_id)
     if run is None:
