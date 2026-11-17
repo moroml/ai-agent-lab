@@ -1152,7 +1152,7 @@ async def loaded_model_tags():
 
 
 # 画面から「VRAM を空ける」「Ollama を終了」したあとや、アプリだけを起動した直後は
-# 裏で温め直さない (system.py が切り替える)。エンジン起動ボタンで解除する。
+# 裏で温め直さない (system.py が切り替える)。エンジン画面の「自動読み込み」で解除する。
 keepwarm_paused = True
 
 

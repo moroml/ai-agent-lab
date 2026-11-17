@@ -53,11 +53,11 @@ attach.register(app)    # ファイル・フォルダの添付 (ドロップ・P
 @app.on_event("startup")
 async def _startup_prewarm():
     # アプリの起動ではエンジンを立ち上げない (2026-11-17 ユーザー指示)。default モデルの
-    # 先読みは画面の「エンジン起動」(system.start_all) で行う。
+    # 先読みはエンジン画面の「自動読み込み」を入れたときだけ行う。
     # cascade 高速モデルの keep-warm: 期限切れ・追い出しで Ollama が
     # 空になったときだけ温め直し、次の cascade の下書きが再ロード待ち
     # (実測最大約120秒) で止まらないようにする。他モデルが載っている
-    # ときは追い出さない (llm.keepwarm_should_load)。エンジン起動までは止めておく。
+    # ときは追い出さない (llm.keepwarm_should_load)。自動読み込みが切の間は止めておく。
     asyncio.create_task(llm.keepwarm_fast_model(manager.running_count))
 
 
@@ -239,7 +239,7 @@ async def start_run(req: RunRequest) -> dict:
     if req.think is not None:
         gen_override["think"] = req.think
     if not await llm.is_alive():
-        raise HTTPException(503, "Ollamaが起動していません(左の「エンジン起動」で起動してください)")
+        raise HTTPException(503, "Ollamaが起動していません(左の「エンジン」画面で起動してください)")
     if req.attach and not (attach.STORE / req.attach).is_dir():
         raise HTTPException(404, "添付が見つかりません。もう一度添付してください")
     if req.claude_review:
@@ -414,7 +414,7 @@ async def start_bench(req: BenchRequest) -> dict:
     info = llm.resolve(cfg, req.model)
     # Ollama の死活は Ollama バックエンドのモデルをベンチするときだけ要求する
     if info.get("backend", "ollama") == "ollama" and not await llm.is_alive():
-        raise HTTPException(503, "Ollamaが起動していません(左の「エンジン起動」で起動してください)")
+        raise HTTPException(503, "Ollamaが起動していません(左の「エンジン」画面で起動してください)")
     usable, status = await llm.model_usable(cfg, req.model, installed)
     if not usable:
         raise HTTPException(400, llm.unusable_reason(info, status))
@@ -497,7 +497,7 @@ async def continue_run(run_id: str, req: ContinueRequest) -> dict:
     if manager.get_live(run_id) is not None:
         raise HTTPException(409, "実行中のタスクには追加指示を送れません(完了後に送信してください)")
     if not await llm.is_alive():
-        raise HTTPException(503, "Ollamaが起動していません(左の「エンジン起動」で起動してください)")
+        raise HTTPException(503, "Ollamaが起動していません(左の「エンジン」画面で起動してください)")
 
     run = manager.reopen(run_id)
     if run is None:

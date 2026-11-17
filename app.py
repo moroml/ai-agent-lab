@@ -2,7 +2,7 @@
 
 uvicornサーバーをバックグラウンドスレッドで起動し、
 ネイティブウィンドウ(WebView2)でダッシュボードを表示する。
-エンジン(Ollama 等)は起動しない。画面の「エンジン起動」ボタンで立ち上げる。
+エンジン(Ollama 等)は起動しない。画面の「エンジン」で立ち上げる。
 
 agent-orchestra の app.py を移植(旧D:ドライブ参照を除去。
 OLLAMA_* 環境変数はシステム/ユーザー環境変数に委ね、ここでは上書きしない)。
@@ -91,7 +91,7 @@ body { background:#0d1117; color:#8b949e; font-family:'Segoe UI',sans-serif;
 
 def main() -> None:
     log("=== app start ===")
-    # エンジン(Ollama 等)は起動しない。画面ヘッダーの「エンジン起動」で立ち上げる
+    # エンジン(Ollama 等)は起動しない。画面の「エンジン」で立ち上げる
     log(f"ollama alive: {_port_open(11434)}")
     port = _free_port(8765)
     log(f"port chosen: {port}")
