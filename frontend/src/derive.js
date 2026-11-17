@@ -230,6 +230,11 @@ export const BACKEND_META = {
   anthropic: { label: "Claude API（クラウド・従量課金）", short: "Claude API" },
 };
 
+// モデルの表示名。同じタグの別設定(無検閲版など)は models.yaml の label で見分ける
+export function modelName(m) {
+  return m?.label || m?.tag || m?.key || "";
+}
+
 export function backendMeta(m) {
   return BACKEND_META[m?.backend] ?? BACKEND_META.ollama;
 }

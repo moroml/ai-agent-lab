@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Check, Copy, KeyRound, RefreshCw } from "lucide-react";
 import { fetchApiKeyStatus, generateApiKey, revokeModelKey } from "../api.js";
-import { modelStatusNote, serverDisplayName, shortBaseUrl } from "../derive.js";
+import { modelName, modelStatusNote, serverDisplayName, shortBaseUrl } from "../derive.js";
 
 // 接続状態パネル: バックエンド/サーバーごとに「今つながっているか・
 // 何が使えるか」を1画面で確認する。変更できるのは OpenAI互換APIのキー発行だけ
@@ -144,7 +144,7 @@ function ApiKeyCard({ models }) {
             <option value="auto">auto（自動選択）</option>
             {models.map((m) => (
               <option key={m.key} value={m.key}>
-                {m.key}（{m.tag}）{m.installed ? "" : " ※使用不可"}
+                {modelName(m)}（{m.key}）{m.installed ? "" : " ※使用不可"}
               </option>
             ))}
           </select>
@@ -280,7 +280,7 @@ export default function ConnectionsView({ models, onRefresh }) {
                       <ul className="mt-1.5 space-y-1">
                         {registered.map((m) => (
                           <li key={m.key} className="flex items-baseline gap-2 text-[13px]">
-                            <span className="font-medium text-slate-200">{m.tag}</span>
+                            <span className="font-medium text-slate-200">{modelName(m)}</span>
                             <span className="text-slate-400">{m.key}</span>
                             {m.installed ? (
                               <span className="ml-auto shrink-0 font-semibold text-green-400">使用可</span>

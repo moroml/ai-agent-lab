@@ -85,6 +85,7 @@ models:
     for: '音楽生成 ACE-Step 1.5 XL turbo・高品質(offload前提)'
   deepseek_strata:
     tag: "deepseek-v4.1-flash"
+    label: "DeepSeek V4.1 Flash"
     backend: openai
     base_url: "http://127.0.0.1:8082/v1"
     server_name: "Strata"
@@ -98,6 +99,7 @@ models:
     for: "DeepSeek V4.1 Flash, 8K"
   deepseek_strata_q:
     tag: "deepseek-v4.1-flash"
+    label: "DeepSeek V4.1 Flash 品質版"
     backend: openai
     base_url: "http://127.0.0.1:8083/v1"
     server_name: "Strata"
@@ -144,6 +146,7 @@ models:
     options: {temperature: 0.7, top_p: 0.95, min_p: 0}
   impl-plan-review:
     tag: "qwen3.8:27b"
+    hidden: true             # impl_plan_review 専用の設定。UIの選択肢には出さない(pro と同じタグで紛らわしいため)
     family: qwen35
     tier: external
     placement: hybrid
@@ -212,6 +215,7 @@ models:
       MTP非同梱で自己投機が効かず、同サイズのproに2.2倍差をつけられる / reasoning effort可変"
   pro:
     tag: "qwen3.8:27b"
+    label: "Qwen3.8 27B"
     family: qwen35           # qwen3系とはthink/サンプリングの作法が違うので family を分ける
     tier: probation      # 実タスク44.5分×(25反復未完・2026-08-20・1サンプル)のためツール必須経路から除外。
                          # ただし chat難問分岐(既定allow_ram=False)では唯一の受け皿なので chat系には残す。
@@ -425,6 +429,7 @@ models:
     use: "Dirk-Qwen3.8-27B(qwen35 dense) / q4_K_S 16GB・hybrid / tools・thinking / 未ベンチ=probation"
   uncensored:
     tag: "huihui_ai/qwen3.8-abliterated:27b-q4_K_M"   # pro の拒否除去(abliterated)版。第三者(huihui_ai)配布
+    label: "Qwen3.8 27B 無検閲版"
     family: qwen35
     tier: external       # 2026-11-17登録。自動ルーティングには載せず、明示指定(model=uncensored / UI選択)でのみ使う。
                          # archive にすると hub のチャット選択肢からも消えるため external にしている

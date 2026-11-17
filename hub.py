@@ -544,12 +544,12 @@ async def hub_categories(request: Request) -> dict:
     want = set((cats.get("chat") or {}).get("candidates") or [])
     chat_models = []
     for key, m in (cfg.get("models") or {}).items():
-        if m.get("kind") == "music" or m.get("tier") == "archive":
+        if m.get("kind") == "music" or m.get("tier") == "archive" or m.get("hidden"):
             continue
         if want and not want & set(m.get("strengths") or []):
             continue
-        chat_models.append({"key": key, "tag": m.get("tag"), "for": m.get("for", ""),
-                            "backend": m.get("backend", "ollama")})
+        chat_models.append({"key": key, "tag": m.get("tag"), "label": m.get("label", ""),
+                            "for": m.get("for", ""), "backend": m.get("backend", "ollama")})
     public = {name: {k: v for k, v in c.items() if k != "system"} for name, c in cats.items()}
     return {"categories": public, "chat_models": chat_models}
 

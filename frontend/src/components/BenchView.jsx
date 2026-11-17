@@ -151,7 +151,7 @@ export default function BenchView({ models, runs, onStart, onCancel, prefill, on
               return {
                 blocked: !usable(m),
                 note,
-                suffix: [m.scanned ? "(PCから検出)" : m.for ? `(${m.for})` : "", tier ? `[${tier}]` : ""].filter(Boolean).join(" "),
+                suffix: [m.scanned ? "PCから検出" : m.for, tier].filter(Boolean).join(" ・ "),
               };
             }}
           />

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { groupByBackend, shortBaseUrl } from "../derive.js";
+import { groupByBackend, modelName, shortBaseUrl } from "../derive.js";
 
 /**
  * モデル選択(カード式)。まず接続先サーバーのカード(Ollama / llama-server /
@@ -14,6 +14,7 @@ export default function ModelPicker({ models, value, onChange, extraOptions = []
   const groups = useMemo(() => groupByBackend(models), [models]);
   const valueGroupKey = groups.find((g) => g.models.some((m) => m.key === value))?.key ?? null;
   const [activeKey, setActiveKey] = useState(valueGroupKey ?? groups[0]?.key ?? null);
+  const [showBlocked, setShowBlocked] = useState(false);
 
   // 外から選択が変わったら(プリフィル等)、そのモデルのサーバーを開いておく
   useEffect(() => {
@@ -87,30 +88,51 @@ export default function ModelPicker({ models, value, onChange, extraOptions = []
         })}
       </div>
 
-      {/* 選択中サーバーのモデル */}
-      {active && (
-        <div className="mt-2 flex flex-wrap gap-2" role="group" aria-label="モデル">
-          {active.models.map((m) => {
-            const d = describe ? describe(m) : { blocked: false, note: "", suffix: "" };
-            const selected = value === m.key;
-            return (
-              <button
-                key={m.key}
-                type="button"
-                disabled={d.blocked}
-                onClick={() => onChange(m.key)}
-                aria-pressed={selected}
-                title={d.blocked ? (d.note || "").trim() || "このモデルは今使えません" : m.tag}
-                className={`${chipCls(selected)} disabled:cursor-not-allowed disabled:opacity-50`}
-              >
-                <span className="font-medium">{m.tag}</span>
-                {d.suffix && <span className="text-xs text-slate-400">{d.suffix}</span>}
-                {d.note && <span className="text-[11px] text-amber-400">{d.note.trim()}</span>}
-              </button>
-            );
-          })}
-        </div>
-      )}
+      {/* 選択中サーバーのモデル。用途の説明はツールチップへ回し、今使えないモデルは畳む */}
+      {active && (() => {
+        const items = active.models.map((m) => ({ m, d: describe ? describe(m) : { blocked: false, note: "", suffix: "" } }));
+        const usable = items.filter(({ m, d }) => !d.blocked || m.key === value);
+        const blocked = items.filter(({ m, d }) => d.blocked && m.key !== value);
+        const chip = ({ m, d }) => {
+          const selected = value === m.key;
+          const why = d.blocked ? (d.note || "").trim() || "このモデルは今使えません" : "";
+          return (
+            <button
+              key={m.key}
+              type="button"
+              disabled={d.blocked}
+              onClick={() => onChange(m.key)}
+              aria-pressed={selected}
+              title={[modelName(m) !== m.tag ? m.tag : "", d.suffix, why].filter(Boolean).join(" ・ ")}
+              className={`${chipCls(selected)} disabled:cursor-not-allowed disabled:opacity-50`}
+            >
+              <span className="font-medium">{modelName(m)}</span>
+              {d.note && <span className="text-[11px] text-amber-400">{d.note.trim()}</span>}
+            </button>
+          );
+        };
+        return (
+          <div className="mt-2">
+            <div className="flex flex-wrap gap-2" role="group" aria-label="モデル">
+              {usable.map(chip)}
+              {!usable.length && <p className="text-xs text-slate-500">このサーバーで今使えるモデルはありません</p>}
+            </div>
+            {blocked.length > 0 && (
+              <div className="mt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowBlocked((v) => !v)}
+                  aria-expanded={showBlocked}
+                  className="text-xs text-slate-400 underline-offset-2 hover:text-slate-200 hover:underline"
+                >
+                  {showBlocked ? "今使えないモデルを隠す" : `今使えないモデル ${blocked.length} 件を表示`}
+                </button>
+                {showBlocked && <div className="mt-2 flex flex-wrap gap-2">{blocked.map(chip)}</div>}
+              </div>
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 }

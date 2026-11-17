@@ -249,6 +249,8 @@ def resolve(cfg, key):
         "strengths": m.get("strengths", []),
         "for": m.get("for", ""),       # UI表示用の短い用途
         "use": m.get("use", ""),
+        "label": m.get("label", ""),   # UI表示名(同じタグのモデルを見分ける)。空ならタグ
+        "hidden": m.get("hidden", False),  # 専用プロファイル等。UIの選択肢に出さない
     }
 
 
@@ -259,9 +261,10 @@ def model_catalog(cfg, installed=None):
     scanned は resolve() のフォールバックで family 推定・tier=discovered が付き、
     自動ルーティングには入らない(明示選択でのみ使用)。埋め込み等は除外。
     """
-    configured = [resolve(cfg, k) for k, m in cfg.get("models", {}).items()
-                  if m.get("kind") != "music"]
-    known_tags = {m["tag"] for m in configured}
+    all_configured = [resolve(cfg, k) for k, m in cfg.get("models", {}).items()
+                      if m.get("kind") != "music"]
+    known_tags = {m["tag"] for m in all_configured}
+    configured = [m for m in all_configured if not m["hidden"]]
     scanned = []
     for tag in sorted(installed or set()):
         base_tag = tag.removesuffix(":latest")

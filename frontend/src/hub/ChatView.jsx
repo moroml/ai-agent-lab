@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Brain, Copy, Menu, Plus, RotateCcw, Send, Square, Trash2 } from "lucide-react";
 import Markdown from "../components/md.jsx";
+import { backendMeta, modelName } from "../derive.js";
 import { fetchCategories, prewarmChat, streamChat } from "./api.js";
 import { ErrorNote, inputCls, usePersisted } from "./ui.jsx";
 
@@ -24,6 +25,20 @@ export default function ChatView() {
   useEffect(() => { prewarmChat(model).catch(() => { /* 先読み失敗は送信時に改めて表示される */ }); }, [model]);
   const conv = convs.find((c) => c.id === currentId) ?? null;
   const sorted = useMemo(() => [...convs].sort((a, b) => b.updated - a.updated), [convs]);
+  // 選択肢は接続先ごとにまとめ、用途の説明はツールチップへ回して一覧を短くする
+  const chatGroups = useMemo(() => {
+    const groups = new Map();
+    for (const m of catalog?.chat_models ?? []) {
+      const label = backendMeta(m).short;
+      if (!groups.has(label)) groups.set(label, []);
+      groups.get(label).push(m);
+    }
+    return [...groups];
+  }, [catalog]);
+  // 保存済みの選択が選択肢から消えていたら(非表示化など)、表示と送信先を揃えるため auto に戻す
+  useEffect(() => {
+    if (catalog && model !== "auto" && !catalog.chat_models?.some((m) => m.key === model)) setModel("auto");
+  }, [catalog, model, setModel]);
   useEffect(() => { endRef.current?.scrollIntoView({ block: "end" }); }, [conv?.messages]);
   useEffect(() => () => abortRef.current?.abort(), []);
 
@@ -124,8 +139,10 @@ export default function ChatView() {
           <label className="sr-only" htmlFor="chat-model">モデル</label>
           <select id="chat-model" value={model} onChange={(e) => setModel(e.target.value)} className="min-h-10 max-w-[14rem] rounded-lg border border-slate-700 bg-slate-900 px-2 text-xs text-slate-200">
             <option value="auto">自動（{catalog?.categories?.chat?.model ?? "既定"}）</option>
-            {catalog?.chat_models?.map((m) => (
-              <option key={m.key} value={m.key}>{m.tag} — {m.for}</option>
+            {chatGroups.map(([label, ms]) => (
+              <optgroup key={label} label={label}>
+                {ms.map((m) => <option key={m.key} value={m.key} title={m.for}>{modelName(m)}</option>)}
+              </optgroup>
             ))}
           </select>
           <button

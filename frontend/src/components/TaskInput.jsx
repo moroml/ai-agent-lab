@@ -185,7 +185,7 @@ function TaskInput({ models, onStart, prefill, onCancel, visible, suggestions = 
                   : m.needs_ram && !m.ram_ok ? " ※RAM不足"
                   : m.needs_ram && !light && !allowRam ? " ※RAM併用をONに"
                   : m.needs_ram && !light ? " ※低速" : "");
-              return { blocked, note, suffix: m.scanned ? "(PCから検出)" : m.for ? `(${m.for})` : "" };
+              return { blocked, note, suffix: m.scanned ? "PCから検出" : m.for };
             }}
           />
         </div>
