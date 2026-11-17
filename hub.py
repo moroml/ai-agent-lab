@@ -378,6 +378,8 @@ async def hub_prewarm(req: PrewarmReq, request: Request) -> dict:
     from runs import manager
     if manager.running_count():
         return {"model": None, "skipped": "agent_running"}
+    if llm.keepwarm_paused:   # 自動読み込みが切なら勝手に載せない (エンジン画面のスイッチ。既定は切)
+        return {"model": None, "skipped": "autoload_off"}
     cfg = llm.load_config()
     key = await pick_chat_model(cfg, req.model, _cat(cfg, "chat"))
     task = asyncio.create_task(llm.prewarm(cfg, key))
