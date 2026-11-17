@@ -511,7 +511,8 @@ class Toolbox:
             args += ["-g", glob]
         args.append(root)
         try:
-            proc = subprocess.run(args, capture_output=True, timeout=30)
+            proc = subprocess.run(args, capture_output=True, timeout=30,
+                                  creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         except (OSError, subprocess.TimeoutExpired):
             return None
         if proc.returncode not in (0, 1):   # 2=エラー(表現の差など)→ 従来経路へ

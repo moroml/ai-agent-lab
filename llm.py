@@ -1245,7 +1245,8 @@ def _read_driver_vram_used():
     try:
         proc = subprocess.run(
             ["typeperf", r"\GPU Adapter Memory(*)\Dedicated Usage", "-sc", "1"],
-            capture_output=True, timeout=15)
+            capture_output=True, timeout=15,
+            creationflags=subprocess.CREATE_NO_WINDOW)  # pythonw 配下だと呼ぶたびに窓が開く
         text = proc.stdout.decode("utf-8", errors="replace")
     except Exception:
         return None

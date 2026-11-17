@@ -59,7 +59,8 @@ def acestep_processes(pattern: str) -> list[psutil.Process]:
 def start_acestep(script: str) -> None:
     """起動スクリプトは WMI で切り離して起動し、すぐ戻る (start-ace-detached.ps1)。"""
     subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script],
-                   capture_output=True, timeout=60, check=True)
+                   capture_output=True, timeout=60, check=True,
+                   creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
 
 
 async def for_music(cfg: dict) -> list[str]:
