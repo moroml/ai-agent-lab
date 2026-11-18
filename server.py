@@ -509,15 +509,25 @@ async def continue_run(run_id: str, req: ContinueRequest) -> dict:
         raise HTTPException(404, "継続可能なRunが見つかりません(完了済みのタスクを選んでください)")
     try:
         cfg = llm.load_config()
-        # 継続作業はツールを使うため、tools非対応モデルのRunはコーダーへ切り替える
-        if not llm.resolve(cfg, run.model)["tools"]:
-            installed = set(await llm.list_models())
-            run.model = router.pick_model(cfg, message, "code", installed=installed)
-            run.model_tag = llm.resolve(cfg, run.model)["tag"]
+        if run.mode in ("code", "swarm-code"):
+            # 継続作業はツールを使うため、tools非対応モデルのRunはコーダーへ切り替える
+            if not llm.resolve(cfg, run.model)["tools"]:
+                installed = set(await llm.list_models())
+                run.model = router.pick_model(cfg, message, "code", installed=installed)
+                run.model_tag = llm.resolve(cfg, run.model)["tag"]
 
-        def factory():
-            return CodeOrchestrator(run, cfg, critique=run.critique,
-                                    reviewer_model=run.reviewer_model).continue_task(message)
+            def factory():
+                return CodeOrchestrator(run, cfg, critique=run.critique,
+                                        reviewer_model=run.reviewer_model).continue_task(message)
+        else:
+            # 文章で答えた Run は、同じモデルが会話の続きとして答える (コーディングエージェントを起動しない)
+            task = run.task
+            if run.attach and (attach.STORE / run.attach).is_dir():
+                task = f"{task}\n\n{(await asyncio.to_thread(attach.describe, run.attach))['describe']}"
+
+            def factory():
+                return DirectOrchestrator(run.bus, cfg, run.model,
+                                          gen_override=run.gen_override).follow_up(task, message)
 
         manager.start(run, factory)
     except Exception:

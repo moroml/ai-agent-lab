@@ -924,6 +924,9 @@ _RESCUE_MEMO_TEMPLATE_AGG = (
     "思考メモの文章をそのまま転記する必要はありません。\n\n")
 
 
+FOLLOW_UP_TITLE = "🛠 追加指示"   # 追加指示ノードの題の接頭辞 (画面の会話表示もこれで見分ける)
+
+
 class DirectOrchestrator:
     """単一呼び出しで完結させる軽量モード(2026-10-28 第2弾)。
 
@@ -939,6 +942,73 @@ class DirectOrchestrator:
         self.model = model
         self.gen_override = gen_override or {}
 
+    async def _answer(self, answer_id: str, messages: list[dict]) -> None:
+        """messages に対する回答を answer_id のノードへ流し込み、完了させる。"""
+        bus = self.bus
+
+        async def gen(msgs, early_abort):
+            return await _stream_llm(
+                bus, answer_id, msgs, self.cfg, self.model,
+                num_predict=_AGGREGATE_NUM_PREDICT,
+                early_abort=(lang_guard.partial_is_contaminated
+                             if early_abort else None),
+                gen_override=self.gen_override, think_floor=True,
+                think_rescue=True)
+
+        try:
+            final = await _guard_lang(bus, answer_id, messages, gen)
+        except _ThinkRescueAborted as rescue:
+            # 思考の暴走を中断した。蓄積した思考全文をメモとして
+            # 引き継ぎ、think なしで本文だけを再生成する (第2段)。
+            bus.emit_log(
+                answer_id,
+                f"[思考救済] 思考が閾値 {rescue.threshold} トークン相当"
+                f"(概算 {rescue.est_tokens} トークン / "
+                f"{len(rescue.thinking)} 字)に達したため生成を中断しました。"
+                "思考メモを引き継ぎ、think なしで本文を再生成します")
+            final = await self._rescue_answer(answer_id, messages, rescue)
+            bus.emit_log(answer_id,
+                         "[思考救済] 第2段 (think なし) の生成が完了しました")
+        # 空の最終回答を done にしない (実績: 思考暴走・出力上限で
+        # 本文 0 字のまま done になった Run が 3 件)
+        bus.complete(answer_id, _require_final_answer(final))
+
+    async def follow_up(self, task: str, message: str) -> None:
+        """文章で答えた Run への続きの質問。これまでのやりとりを渡し、同じモデルが会話として答える
+        (ファイルを作るコーディングエージェントは起動しない)。"""
+        bus = self.bus
+        root_id = next((i for i in bus.order if bus.nodes[i].kind == "task"), None)
+        if root_id is None:
+            root_id = bus.create_node("task", "ユーザータスク", task)
+        bus.resume()
+        bus.set_status(root_id, "running")
+        try:
+            messages = [{"role": "system", "content": DIRECT_SYSTEM}, {"role": "user", "content": task}]
+            for i in bus.order:
+                n = bus.nodes[i]
+                if n.kind == "answer" and n.sync_output():
+                    if messages[-1]["role"] == "assistant":   # 下書き→清書など回答が続くときは後のものを採る
+                        messages.pop()
+                    messages.append({"role": "assistant", "content": n.output})
+                elif n.kind == "coder" and n.title.startswith(FOLLOW_UP_TITLE) and messages[-1]["role"] == "assistant":
+                    messages.append({"role": "user", "content": n.detail})
+            if messages[-1]["role"] == "user" and len(messages) > 2:   # 答えの出なかった前回の質問は今回とまとめる
+                message = f"{messages.pop()['content']}\n\n{message}"
+            ask_id = bus.create_node("coder", f"{FOLLOW_UP_TITLE}: {message[:40]}", message, root_id)
+            bus.complete(ask_id, "続きの質問を受け付けました")
+            messages.append({"role": "user", "content": message})
+            answer_id = bus.create_node("answer", "⭐ 追加指示への対応", "", root_id)
+            await self._answer(answer_id, messages)
+            bus.complete(root_id, "追加指示への対応が完了しました")
+            bus.run_finished()
+        except asyncio.CancelledError:
+            bus.cancel_all("ユーザーによって中断されました")
+            raise
+        except Exception as e:
+            bus.complete(root_id, error=f"実行エラー: {e}")
+            bus.run_finished(error=str(e))
+            raise
+
     async def run(self, task: str, run_id: str = "") -> None:
         bus = self.bus
         bus.reset()
@@ -950,32 +1020,7 @@ class DirectOrchestrator:
                 {"role": "system", "content": DIRECT_SYSTEM},
                 {"role": "user", "content": task},
             ]
-            async def gen(msgs, early_abort):
-                return await _stream_llm(
-                    bus, answer_id, msgs, self.cfg, self.model,
-                    num_predict=_AGGREGATE_NUM_PREDICT,
-                    early_abort=(lang_guard.partial_is_contaminated
-                                 if early_abort else None),
-                    gen_override=self.gen_override, think_floor=True,
-                    think_rescue=True)
-
-            try:
-                final = await _guard_lang(bus, answer_id, messages, gen)
-            except _ThinkRescueAborted as rescue:
-                # 思考の暴走を中断した。蓄積した思考全文をメモとして
-                # 引き継ぎ、think なしで本文だけを再生成する (第2段)。
-                bus.emit_log(
-                    answer_id,
-                    f"[思考救済] 思考が閾値 {rescue.threshold} トークン相当"
-                    f"(概算 {rescue.est_tokens} トークン / "
-                    f"{len(rescue.thinking)} 字)に達したため生成を中断しました。"
-                    "思考メモを引き継ぎ、think なしで本文を再生成します")
-                final = await self._rescue_answer(answer_id, messages, rescue)
-                bus.emit_log(answer_id,
-                             "[思考救済] 第2段 (think なし) の生成が完了しました")
-            # 空の最終回答を done にしない (実績: 思考暴走・出力上限で
-            # 本文 0 字のまま done になった Run が 3 件)
-            bus.complete(answer_id, _require_final_answer(final))
+            await self._answer(answer_id, messages)
             bus.complete(root_id, "全工程が完了しました")
             bus.run_finished()
         except asyncio.CancelledError:

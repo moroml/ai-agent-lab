@@ -92,3 +92,25 @@ def test_direct_orchestrator_single_call(monkeypatch):
     answers = [n for n in bus.nodes.values() if n["kind"] == "answer"]
     assert len(answers) == 1 and answers[0]["output"] == "ANS"
     assert bus.finished and bus.error is None
+
+
+def test_follow_up_answers_as_conversation(monkeypatch):
+    """文章で答えた Run への続きは、これまでのやりとりを渡して同じモデルが答える。"""
+    from events import EventBus
+    calls = []
+
+    async def fake_stream(bus, node_id, messages, cfg, key, **kwargs):
+        calls.append([dict(m) for m in messages])
+        return f"ANS{len(calls)}"
+
+    monkeypatch.setattr(orchestrator, "_stream_llm", fake_stream)
+    bus = EventBus()
+    orc = DirectOrchestrator(bus, cfg={}, model="m")
+    asyncio.run(orc.run("最初の質問"))
+    asyncio.run(orc.follow_up("最初の質問", "続き1"))
+    asyncio.run(orc.follow_up("最初の質問", "続き2"))
+    assert [(m["role"], m["content"]) for m in calls[2][1:]] == [
+        ("user", "最初の質問"), ("assistant", "ANS1"), ("user", "続き1"), ("assistant", "ANS2"), ("user", "続き2")]
+    kinds = [bus.nodes[i].kind for i in bus.order]
+    assert kinds == ["task", "answer", "coder", "answer", "coder", "answer"]
+    assert bus.nodes[bus.order[-1]].output == "ANS3"
