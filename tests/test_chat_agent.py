@@ -8,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import chat_agent
 import llm
 import tools
+from orchestrator import _web_research   # conftest が差し替える前の本物
 
 
 def collect(agen):
@@ -78,3 +79,33 @@ def test_shrink_keeps_latest_tool_result():
     msgs = [{"role": "tool", "content": "a" * 40000}, {"role": "tool", "content": "b" * 5000}]
     chat_agent._shrink(msgs)
     assert len(msgs[0]["content"]) < 400 and len(msgs[1]["content"]) == 5000
+
+
+# ---- 文章回答の前段の Web 調査 (orchestrator._web_research) ----
+def research(monkeypatch, replies, cfg=None):
+    from events import EventBus
+    chat, calls = fake_chat(replies)
+    monkeypatch.setattr(llm, "chat", lambda *a, on_delta=None, **kw: chat(*a, on_delta=lambda *_: None, **kw))
+    monkeypatch.setattr(chat_agent, "web_search", lambda query, max_results=6: f"1. 結果\nhttps://example.com/{query}")
+    bus = EventBus()
+    root = bus.create_node("task", "t", "")
+    out = asyncio.run(_web_research(bus, root, cfg or {"models": {}}, "m", "今日のニュースは？"))
+    return out, calls, [n.kind for n in bus.nodes.values()]
+
+
+def test_research_appends_results(monkeypatch):
+    out, calls, kinds = research(monkeypatch, [call("web_search", query="news"), {"content": "不要"}])
+    assert out.startswith("今日のニュースは？") and "https://example.com/news" in out
+    assert calls[0] == chat_agent.WEB_SCHEMA and "research" in kinds
+
+
+def test_research_skips_when_not_needed(monkeypatch):
+    out, calls, kinds = research(monkeypatch, [{"content": "不要"}])
+    assert out == "今日のニュースは？" and len(calls) == 1 and "research" not in kinds
+
+
+def test_research_ignores_unknown_tool_and_can_be_disabled(monkeypatch):
+    out, _, _ = research(monkeypatch, [call("write_file", path="a", content="b"), {"content": "不要"}])
+    assert out == "今日のニュースは？"
+    out, calls, _ = research(monkeypatch, [], cfg={"models": {}, "web_research": False})
+    assert out == "今日のニュースは？" and calls == []

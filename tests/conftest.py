@@ -5,6 +5,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import gpu_switch
+import orchestrator
 
 
 @pytest.fixture(autouse=True)
@@ -14,3 +15,11 @@ def _no_real_gpu_switch(monkeypatch):
     monkeypatch.setattr(gpu_switch, "acestep_processes", lambda pattern: [])
     monkeypatch.setattr(gpu_switch, "start_acestep",
                         lambda script: pytest.fail("テストから ACE-Step を起動しようとした"))
+
+
+@pytest.fixture(autouse=True)
+def _no_real_web_research(monkeypatch):
+    """文章回答の前段の Web 調査で、テストから本物の LLM と Web を呼ばない。"""
+    async def skip(bus, root_id, cfg, key, task):
+        return task
+    monkeypatch.setattr(orchestrator, "_web_research", skip)

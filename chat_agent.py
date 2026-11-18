@@ -38,7 +38,7 @@ SYSTEM = (
     "- ツールが要らない雑談や質問には、そのまま答える。"
 )
 
-SCHEMA = [t for t in tools.TOOLS_SCHEMA if t["function"]["name"] in FILE_TOOLS] + [
+WEB_SCHEMA = [
     {"type": "function", "function": {
         "name": "web_search",
         "description": "Web を検索し、タイトル・URL・要約の一覧を返す。詳しく読むには fetch_url を使う",
@@ -55,6 +55,7 @@ SCHEMA = [t for t in tools.TOOLS_SCHEMA if t["function"]["name"] in FILE_TOOLS] 
             "max_chars": {"type": "integer", "description": "返す文字数。既定4000、上限8000"}},
             "required": ["url"]}}},
 ]
+SCHEMA = [t for t in tools.TOOLS_SCHEMA if t["function"]["name"] in FILE_TOOLS] + WEB_SCHEMA
 
 
 # ------------------------------------------------------------------ web
