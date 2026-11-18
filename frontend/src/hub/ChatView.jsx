@@ -113,6 +113,8 @@ export default function ChatView() {
         { messages: history.map(forModel), model, think, tools, conv: id, attach: history.at(-1)?.attach?.batch ?? null },
         (ev) => {
           if (ev.error) throw new Error(ev.error);
+          // 回答が拒否で、無検閲モデルが答え直す: 書きかけの拒否文を消して受け直す
+          if (ev.retry) update((m) => ({ ...m, content: "", thinking: "", steps: undefined, retried: true }));
           if (ev.model) update((m) => ({ ...m, model: ev.model, tag: ev.tag }));
           if (ev.thinking) update((m) => ({ ...m, thinking: m.thinking + ev.thinking }));
           if (ev.content) update((m) => ({ ...m, content: m.content + ev.content }));
@@ -336,6 +338,7 @@ function Message({ m, last, busy, onRegenerate }) {
         <div className="flex items-center gap-3 text-[11px] text-slate-500">
           {m.tag && <span>{m.tag}</span>}
           {tps && <span>{m.meta.elapsed_sec}秒 · {tps} tok/s</span>}
+          {m.retried && <span className="text-violet-300">拒否されたため答え直しました</span>}
           {m.stopped && <span className="text-amber-400">停止しました</span>}
           {m.content && (
             <CopyButton text={m.content} />

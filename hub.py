@@ -27,6 +27,7 @@ import gpu_switch
 import llm
 import music
 import openai_api
+from orchestrator import refusal_model
 from tools import WORKSPACE
 
 router = APIRouter()
@@ -359,21 +360,39 @@ async def hub_chat(req: ChatReq, request: Request) -> StreamingResponse:
     async def events():
         started = time.monotonic()
         yield _sse({"model": key, "tag": info["tag"], "for": info.get("for", ""), "tools": use_tools})
-        if use_tools:
-            stream = chat_agent.run(cfg, key, msgs, subdir=f"chat_{req.conv}", think=think,
-                                    temperature=req.temperature, opts=tool_cfg)
-        else:
-            stream = llm.chat_stream(cfg, key, msgs, temperature=req.temperature,
-                                     num_ctx=cat.get("num_ctx"), think=think,
-                                     num_predict=cat.get("num_predict"))
+
+        def answer(model, carried):
+            agent = use_tools and llm.resolve(cfg, model)["tools"]
+            # chat_agent.run は渡した履歴を書き換えるので写しを渡す。答え直しには実行済みのツール結果を
+            # 引き継ぎ、同じ操作 (ファイルの書き込み等) を繰り返させない
+            ms = [dict(m) for m in msgs] + (carried if agent else [])
+            if agent:
+                return ms, chat_agent.run(cfg, model, ms, subdir=f"chat_{req.conv}", think=think,
+                                          temperature=req.temperature, opts=tool_cfg)
+            return ms, llm.chat_stream(cfg, model, ms, temperature=req.temperature,
+                                       num_ctx=cat.get("num_ctx"), think=think,
+                                       num_predict=cat.get("num_predict"))
         try:
-            async for ev in stream:
-                if ev.get("done"):
-                    meta = ev.get("meta") or {}
-                    meta["elapsed_sec"] = round(time.monotonic() - started, 2)
-                    yield _sse({"done": True, "meta": meta})
-                else:
-                    yield _sse(ev)
+            model, carried = key, []
+            while True:
+                said, meta = "", {}
+                ms, stream = answer(model, carried)
+                async for ev in stream:
+                    if ev.get("done"):
+                        meta = ev.get("meta") or {}
+                    else:
+                        # 拒否かどうかは最終回答 (最後のツール実行より後の発言) で見る
+                        said = "" if "tool" in ev else said + (ev.get("content") or "")
+                        yield _sse(ev)
+                # 回答が拒否だったら無検閲モデル (refusal_fallback) で1回だけ答え直す。画面は retry で書きかけを消す
+                retry, usable = await refusal_model(cfg, model, said) if model == key else (None, False)
+                if not usable:
+                    break
+                model = retry
+                carried = [m for m in ms if m.get("role") == "tool" or m.get("tool_calls")]
+                yield _sse({"retry": True, "model": retry, "tag": llm.resolve(cfg, retry)["tag"]})
+            meta["elapsed_sec"] = round(time.monotonic() - started, 2)
+            yield _sse({"done": True, "meta": meta})
         except llm.OllamaError as exc:
             yield _sse({"error": str(exc)})
         finally:

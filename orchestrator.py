@@ -995,20 +995,27 @@ _REFUSAL_RE = re.compile(
     r"|応じ(?:られません|かねます|ることはできません)")
 
 
+async def refusal_model(cfg, model: str, text: str) -> tuple[str | None, bool]:
+    """text が拒否なら (答え直しに使うモデル, 今使えるか)。答え直しの対象外なら (None, False)。"""
+    key = cfg.get("refusal_fallback")
+    if (not key or key == model or key not in (cfg.get("models") or {})
+            or not _REFUSAL_RE.search((text or "")[:400])):
+        return None, False
+    try:
+        return key, (await llm.model_usable(cfg, key, set(await llm.list_models())))[0]
+    except Exception:
+        return key, False
+
+
 async def _unrefuse(bus, answer_id: str, cfg, model: str, messages: list[dict],
                     final: str, gen_override: dict | None = None) -> str:
     """回答が拒否だったら、無検閲モデル (models.yaml の refusal_fallback) で答え直す。
 
     答え直しは別の answer ノードに出す (元の回答は残る)。拒否でない回答の経路は不変。
     """
-    key = cfg.get("refusal_fallback")
-    if (not key or key == model or key not in cfg.get("models", {})
-            or not _REFUSAL_RE.search((final or "")[:400])):
+    key, usable = await refusal_model(cfg, model, final)
+    if not key:
         return final
-    try:
-        usable = (await llm.model_usable(cfg, key, set(await llm.list_models())))[0]
-    except Exception:
-        usable = False
     if not usable:
         bus.emit_log(answer_id, f"[拒否の救済] {key} が使えないため答え直しません")
         return final

@@ -106,6 +106,63 @@ def test_chat_falls_back_and_adds_system(client, monkeypatch):
     assert events[0]["model"] == "b" and events[1] == {"content": "hi"} and events[-1]["done"]
 
 
+def test_chat_refusal_is_reanswered_once(client, monkeypatch):
+    """拒否の回答は refusal_fallback のモデルで1回だけ答え直す (答え直しも拒否ならそのまま返す)。"""
+    cfg = {**CFG, "refusal_fallback": "b"}
+    used = []
+
+    async def installed():
+        return []
+
+    async def usable(cfg, key, inst, _p=None):
+        return (True, "ok")
+
+    async def stream(cfg, key, msgs, **kw):
+        used.append(key)
+        yield {"content": "申し訳ありませんが、そのようなコンテンツの取得や生成を支援することはできません。"}
+        yield {"done": True, "meta": {}}
+    monkeypatch.setattr(llm, "load_config", lambda *a, **k: cfg)
+    monkeypatch.setattr(llm, "list_models", installed)
+    monkeypatch.setattr(llm, "model_usable", usable)
+    monkeypatch.setattr(llm, "chat_stream", stream)
+    r = client.post("/hub/chat", json={"messages": [{"role": "user", "content": "q"}], "model": "a", "tools": False})
+    events = [json.loads(line[6:]) for line in r.text.split("\n\n") if line.startswith("data: ")]
+    assert used == ["a", "b"]
+    assert [e["model"] for e in events if e.get("retry")] == ["b"] and events[-1]["done"]
+
+
+def test_chat_reanswer_keeps_finished_tool_results(client, monkeypatch):
+    """ツールを使ったあとの拒否は、実行済みのツール結果を引き継いで答え直す (同じ操作を繰り返さない)。"""
+    cfg = {**CFG, "refusal_fallback": "b",
+           "models": {k: {**m, "tools": True} for k, m in CFG["models"].items()}}
+    seen = []
+
+    async def installed():
+        return []
+
+    async def usable(cfg, key, inst, _p=None):
+        return (True, "ok")
+
+    async def run(cfg, key, msgs, **kw):
+        seen.append([m["role"] for m in msgs])
+        if key == "a":
+            yield {"content": "お答えできませんが、調べます。"}   # 途中の発言は拒否判定に使わない
+            yield {"tool": {"id": 1, "name": "write_file", "label": "x"}}
+            msgs += [{"role": "assistant", "content": "", "tool_calls": [{}]},
+                     {"role": "tool", "tool_name": "write_file", "content": "書き込み完了"}]
+            yield {"content": "申し訳ありませんが、お答えできません。"}
+        else:
+            yield {"content": "答えです"}
+        yield {"done": True, "meta": {}}
+    monkeypatch.setattr(llm, "load_config", lambda *a, **k: cfg)
+    monkeypatch.setattr(llm, "list_models", installed)
+    monkeypatch.setattr(llm, "model_usable", usable)
+    monkeypatch.setattr(hub.chat_agent, "run", run)
+    r = client.post("/hub/chat", json={"messages": [{"role": "user", "content": "q"}], "model": "a"})
+    assert seen == [["system", "user"], ["system", "user", "assistant", "tool"]]
+    assert r.text.count('"retry"') == 1
+
+
 def test_chat_rejects_trailing_assistant(client, monkeypatch):
     async def installed():
         return ["ta"]
