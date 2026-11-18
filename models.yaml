@@ -396,8 +396,7 @@ models:
     tag: "huihui_ai/qwen3.8-abliterated:27b-q4_K_M"   # pro の拒否除去(abliterated)版。第三者(huihui_ai)配布
     label: "Qwen3.8 27B 無検閲版"
     family: qwen35
-    tier: external       # 2026-11-17登録。自動ルーティングには載せない。明示指定(model=uncensored / UI選択)と、
-                         # 拒否の救済 (refusal_fallback。2026-11-18) でだけ使う。
+    tier: external       # 2026-11-17登録。自動ルーティングには載せず、明示指定(model=uncensored / UI選択)でのみ使う。
                          # archive にすると hub のチャット選択肢からも消えるため external にしている
     placement: hybrid        # 16.5GB(pro と同じ Q4_K_M + vision projector)
     ram_gb: 6
@@ -431,7 +430,7 @@ models:
     tag: "huihui_ai/gemma-4-abliterated:12b"   # gemma12 の拒否除去(abliterated)版。第三者(huihui_ai)配布
     label: "Gemma4 12B 無検閲版"
     family: gemma4
-    tier: external           # 2026-11-18登録。明示指定(UI選択)でのみ使う
+    tier: external           # 2026-11-18登録。明示指定(UI選択)と、拒否の救済 (refusal_fallback) で使う
     placement: vram          # 実測 100%GPU・8.1GB・58.1tok/s(2026-11-18)
     tools: true              # 不安定: web_search を呼んだのは 3回中1回、残りは記憶で答えた(実測)
     mtp: false
@@ -564,8 +563,8 @@ web_research: true
 # 空にすると答え直さない。拒否でない回答には介入しない。
 # 拒否から答え直しの完了までの実測 (2026-11-18、worker が拒否した1問・各1回):
 # uncensored 138秒 / uncensored_fast 77秒 / uncensored_gemma12 43秒。
-# 速さを取るなら uncensored_gemma12 に替える (回答の正確さはどれも未評価)。
-refusal_fallback: uncensored
+# 速さを取って uncensored_gemma12 にしている (2026-11-18 ユーザー指示)。回答の正確さはどれも未評価。
+refusal_fallback: uncensored_gemma12
 
 # 思考暴走の救済 (orchestrator が参照。対象は direct の最終回答段のみ):
 # 実効 think が有効な生成で、思考の累積が tokens (概算トークン。実測換算
