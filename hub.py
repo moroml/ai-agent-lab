@@ -11,6 +11,8 @@ import asyncio
 import ipaddress
 import json
 import os
+import re
+import shutil
 import time
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -25,6 +27,7 @@ import gpu_switch
 import llm
 import music
 import openai_api
+from tools import WORKSPACE
 
 router = APIRouter()
 LGS_DEFAULT = "http://127.0.0.1:8787"
@@ -307,6 +310,10 @@ async def pick_chat_model(cfg: dict, requested: str | None, cat: dict) -> str:
     raise HTTPException(503, "チャットに使えるモデルがありません (Ollama の起動とモデル導入を確認してください)")
 
 
+SECRET_PREFIX = "secret-"   # シークレット会話の ID の頭。作業フォルダを会話の終了時と起動時に消す
+_discarded: set[str] = set()   # 破棄済みのシークレット会話 (ID は使い捨てなので増えても小さい)
+
+
 class ChatMsg(BaseModel):
     role: str
     content: str = Field(max_length=200000)
@@ -340,10 +347,14 @@ async def hub_chat(req: ChatReq, request: Request) -> StreamingResponse:
     info = llm.resolve(cfg, key)
     tool_cfg = cat.get("tools") or {}
     use_tools = bool(info["tools"] and (req.tools if req.tools is not None else tool_cfg.get("enabled", True)))
-    if req.attach:
-        import attach
-        from tools import WORKSPACE
-        await asyncio.to_thread(attach.materialize, req.attach, Path(WORKSPACE) / f"chat_{req.conv}")
+    import attach
+    secret = req.conv.startswith(SECRET_PREFIX)
+    work = Path(WORKSPACE) / f"chat_{req.conv}"
+    # シークレットでは写し終えた元の添付を残さない。再生成で同じ添付がまた届いたら写し済みを使う
+    if req.attach and not (secret and (work / "inputs").is_dir() and not (attach.STORE / req.attach).is_dir()):
+        await asyncio.to_thread(attach.materialize, req.attach, work)
+        if secret:
+            await asyncio.to_thread(shutil.rmtree, attach.STORE / req.attach, True)
 
     async def events():
         started = time.monotonic()
@@ -365,8 +376,33 @@ async def hub_chat(req: ChatReq, request: Request) -> StreamingResponse:
                     yield _sse(ev)
         except llm.OllamaError as exc:
             yield _sse({"error": str(exc)})
+        finally:
+            if req.conv in _discarded:   # 生成中に破棄された会話が、後から書いた分を残さない
+                shutil.rmtree(work, ignore_errors=True)
     return StreamingResponse(events(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@router.delete("/hub/chat/{conv}")
+async def hub_chat_discard(conv: str, request: Request, batch: str | None = None) -> dict:
+    """シークレット会話の作業フォルダ (添付・作成ファイル) と、未送信の添付 batch を消す。通常の会話は対象外。"""
+    require_local_or_key(request)
+    if not re.fullmatch(SECRET_PREFIX + r"[A-Za-z0-9-]{1,57}", conv):
+        raise HTTPException(400, "シークレット会話の ID ではありません")
+    import attach
+    _discarded.add(conv)
+    dirs = [Path(WORKSPACE) / f"chat_{conv}"]
+    if batch:
+        dirs.append(attach._batch_dir(batch, create=False)[1])
+    for d in dirs:
+        await asyncio.to_thread(shutil.rmtree, d, True)
+    return {"ok": not any(d.exists() for d in dirs)}
+
+
+def sweep_secret() -> None:
+    """画面を閉じる前にサーバーが落ちた等で残ったシークレット会話の作業フォルダを消す。"""
+    for d in Path(WORKSPACE).glob(f"chat_{SECRET_PREFIX}*"):
+        shutil.rmtree(d, ignore_errors=True)
 
 
 class PrewarmReq(BaseModel):
@@ -576,3 +612,4 @@ async def hub_categories(request: Request) -> dict:
 
 def register(app) -> None:
     app.include_router(router)
+    sweep_secret()

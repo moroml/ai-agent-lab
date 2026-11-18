@@ -118,6 +118,22 @@ def test_chat_rejects_trailing_assistant(client, monkeypatch):
     assert r.status_code == 400
 
 
+def test_secret_chat_workspace_is_discarded(client, monkeypatch, tmp_path):
+    monkeypatch.setattr(hub, "WORKSPACE", str(tmp_path))
+    for name in ("chat_secret-abc", "chat_secret-old", "chat_normal"):
+        (tmp_path / name / "inputs").mkdir(parents=True)
+    batch = tmp_path / "_attach" / "0123456789ab"
+    batch.mkdir(parents=True)
+    import attach
+    monkeypatch.setattr(attach, "STORE", tmp_path / "_attach")
+    assert client.delete("/hub/chat/secret-abc?batch=0123456789ab").json() == {"ok": True}
+    assert not (tmp_path / "chat_secret-abc").exists() and not batch.exists()
+    # 通常の会話のフォルダは消せない
+    assert client.delete("/hub/chat/normal").status_code == 400
+    hub.sweep_secret()
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["_attach", "chat_normal"]
+
+
 def test_music_files_list_and_traversal(client, monkeypatch, tmp_path):
     monkeypatch.setattr(music, "MUSIC_OUT", tmp_path)
     (tmp_path / "a.mp3").write_bytes(b"ID3")

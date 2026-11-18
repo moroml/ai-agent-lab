@@ -29,6 +29,9 @@ agent-orchestra(並列分解・批評ループ・SSEダッシュボード)と ai
 - 画像・動画は **Local Gen Studio**（`C:\project\local-gen-studio\start-studio.bat` で ComfyUI 8188 + アプリ 8787）
   を `/studio/*` で中継する。LGS の API トークンはサーバー側だけで読み（`studio.token_file` か環境変数
   `LGS_TOKEN`）、ブラウザには渡さない。接続先は `studio.base_url` か `LGS_BASE`。シークレット生成は LGS 本体の画面で行う
+- チャットの「シークレット」をオンにした間の会話は、一覧にもブラウザの保存領域にも入れない。解除・新しい会話・
+  画面の切替・再読み込みで、作業フォルダ `projects/chat_secret-<ID>/`（添付と作成ファイル）ごと消す。
+  消し損ねた分はサーバーの起動時に片付ける。Web検索とページ取得の通信先には従来どおり問い合わせが届く
 - 音楽は ACE-Step REST API（既定 `http://127.0.0.1:8001`）。生成物は `music_out/`（mp3 と同名 json のメタ情報）
 - `/hub/*` `/studio/*` `/music/*` はこのPCからは素通し、他の端末からは OpenAI 互換 API のキーが要る
 

@@ -19,6 +19,9 @@ const get = (url) => fetch(url, { cache: "no-store" }).then(jsonOrThrow);
 
 export const fetchCategories = () => get("/hub/categories");
 export const prewarmChat = (model) => post("/hub/prewarm", { model });
+// シークレット会話の作業フォルダと未送信の添付を消す。画面を閉じる途中でも届くよう keepalive で送る
+export const discardChat = (conv, batch) =>
+  fetch(`/hub/chat/${conv}${batch ? `?batch=${batch}` : ""}`, { method: "DELETE", keepalive: true }).catch(() => {});
 
 // チャット: SSE を fetch で読み、イベントごとに onEvent を呼ぶ
 export async function streamChat(body, onEvent, signal) {

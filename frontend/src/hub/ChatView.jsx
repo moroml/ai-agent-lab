@@ -1,9 +1,10 @@
 // チャット: Run を作らない会話専用の画面。会話はこのブラウザに保存する(サーバーには残さない)。
+// シークレット中の会話はメモリにだけ置き、終えるときにサーバーの作業フォルダも消す。
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Brain, Check, Copy, FileText, Loader2, Menu, Paperclip, Plus, RotateCcw, Send, Square, Trash2, Wrench, X } from "lucide-react";
+import { Brain, Check, Copy, EyeOff, FileText, Loader2, Menu, Paperclip, Plus, RotateCcw, Send, Square, Trash2, Wrench, X } from "lucide-react";
 import Markdown from "../components/md.jsx";
 import { backendMeta, modelName } from "../derive.js";
-import { fetchCategories, prewarmChat, streamChat } from "./api.js";
+import { discardChat, fetchCategories, prewarmChat, streamChat } from "./api.js";
 import { ErrorNote, inputCls, usePersisted } from "./ui.jsx";
 import { AttachBar, DropZone, useAttach, withAttach } from "../components/Attach.jsx";
 
@@ -19,7 +20,8 @@ const forModel = ({ role, content, files, attach }) => {
   return { role, content: text };
 };
 
-const newConv = () => ({ id: crypto.randomUUID?.() ?? String(Date.now()), title: "新しい会話", messages: [], updated: Date.now() });
+// シークレット会話の ID は secret- で始める(hub.py がこの頭の作業フォルダだけを消す)
+const newConv = (secret = false) => ({ id: (secret ? "secret-" : "") + (crypto.randomUUID?.() ?? String(Date.now())), title: "新しい会話", messages: [], updated: Date.now() });
 
 export default function ChatView() {
   const [convs, setConvs] = usePersisted("hub.chat.convs", []);
@@ -27,6 +29,7 @@ export default function ChatView() {
   const [model, setModel] = usePersisted("hub.chat.model", "auto");
   const [think, setThink] = usePersisted("hub.chat.think", false);
   const [tools, setTools] = usePersisted("hub.chat.tools", true);
+  const [secret, setSecret] = useState(null);   // シークレット中の会話。一覧にも localStorage にも入れない
   const [catalog, setCatalog] = useState(null);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -38,7 +41,7 @@ export default function ChatView() {
 
   useEffect(() => { fetchCategories().then(setCatalog).catch((e) => setError(e.message)); }, []);
   useEffect(() => { prewarmChat(model).catch(() => { /* 先読み失敗は送信時に改めて表示される */ }); }, [model]);
-  const conv = convs.find((c) => c.id === currentId) ?? null;
+  const conv = secret ?? convs.find((c) => c.id === currentId) ?? null;
   const sorted = useMemo(() => [...convs].sort((a, b) => b.updated - a.updated), [convs]);
   // 選択肢は接続先ごとにまとめ、用途の説明はツールチップへ回して一覧を短くする
   const chatGroups = useMemo(() => {
@@ -56,8 +59,34 @@ export default function ChatView() {
   }, [catalog, model, setModel]);
   useEffect(() => { endRef.current?.scrollIntoView({ block: "end" }); }, [conv?.messages]);
   useEffect(() => () => abortRef.current?.abort(), []);
+  // 画面を離れる・閉じる・再読み込みでもシークレット会話の作業フォルダを残さない
+  const secretId = useRef(null);
+  secretId.current = secret?.id ?? null;
+  const pending = useRef(null);
+  pending.current = att.state?.batch ?? null;
+  useEffect(() => {
+    const drop = () => { if (secretId.current) discardChat(secretId.current, pending.current); };
+    window.addEventListener("pagehide", drop);
+    return () => { window.removeEventListener("pagehide", drop); drop(); };
+  }, []);
 
-  const patch = (id, fn) => setConvs((cs) => cs.map((c) => (c.id === id ? { ...fn(c), updated: Date.now() } : c)));
+  const patch = (id, fn) => {
+    const next = (c) => (c?.id === id ? { ...fn(c), updated: Date.now() } : c);
+    if (id.startsWith("secret-")) setSecret(next);
+    else setConvs((cs) => cs.map(next));
+  };
+  // シークレットの切替と「新しい会話」: 進行中の生成を止め、今のシークレット会話を未送信の入力・添付ごと捨てる
+  const resetSecret = (on) => {
+    abortRef.current?.abort();
+    if (secret) {
+      discardChat(secret.id, att.state?.batch);
+      att.clear();
+      setInput("");
+    }
+    setSecret(on ? newConv(true) : null);
+    setListOpen(false);
+    setError("");
+  };
 
   async function send(history) {
     let target = conv;
@@ -69,7 +98,7 @@ export default function ChatView() {
     const id = target.id;
     const assistant = { role: "assistant", content: "", thinking: "", meta: null };
     const title = target.messages.length ? target.title : history[0].content.slice(0, 30);
-    setConvs((cs) => cs.map((c) => (c.id === id ? { ...c, title, messages: [...history, assistant], updated: Date.now() } : c)));
+    patch(id, (c) => ({ ...c, title, messages: [...history, assistant] }));
     setBusy(true);
     setError("");
     const ctrl = new AbortController();
@@ -119,7 +148,7 @@ export default function ChatView() {
     if (lastUser >= 0) send(ms.slice(0, lastUser + 1));
   }
 
-  const startNew = () => { setCurrentId(null); setListOpen(false); setError(""); };
+  const startNew = () => { if (secret) return resetSecret(true); setCurrentId(null); setListOpen(false); setError(""); };
   // 会話はこのブラウザにしか無く消すと戻せないので2段階(1回目で「削除?」→3秒以内にもう一度)
   const [armed, setArmed] = useState(null);
   useEffect(() => {
@@ -144,7 +173,8 @@ export default function ChatView() {
           <button type="button" onClick={() => setListOpen(false)} className="min-h-10 rounded-lg px-3 text-slate-400 md:hidden" aria-label="一覧を閉じる">×</button>
         </div>
         <ul className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2 pb-3">
-          {sorted.map((c) => (
+          {secret && <li className="px-3 py-2 text-xs leading-relaxed text-violet-300">シークレット中です。この会話は保存されず、解除・新しい会話・再読み込みで、添付や作成ファイルごと消えます。</li>}
+          {!secret && sorted.map((c) => (
             <li key={c.id} className="group flex items-center">
               <button
                 type="button"
@@ -158,7 +188,7 @@ export default function ChatView() {
               </button>
             </li>
           ))}
-          {!sorted.length && <li className="px-3 py-2 text-xs text-slate-500">会話はこのブラウザに保存されます</li>}
+          {!secret && !sorted.length && <li className="px-3 py-2 text-xs text-slate-500">会話はこのブラウザに保存されます</li>}
         </ul>
       </aside>
 
@@ -167,7 +197,7 @@ export default function ChatView() {
           <button type="button" onClick={() => setListOpen(true)} className="min-h-10 rounded-lg px-2 text-slate-400 md:hidden" aria-label="会話一覧">
             <Menu size={18} aria-hidden="true" />
           </button>
-          <h1 className="mr-auto truncate text-sm font-semibold text-emerald-200">{conv?.title ?? "チャット"}</h1>
+          <h1 className="mr-auto truncate text-sm font-semibold text-emerald-200">{secret ? "シークレット" : conv?.title ?? "チャット"}</h1>
           <label className="sr-only" htmlFor="chat-model">モデル</label>
           <select id="chat-model" value={model} onChange={(e) => setModel(e.target.value)} className="min-h-10 max-w-[14rem] rounded-lg border border-slate-700 bg-slate-900 px-2 text-xs text-slate-200">
             <option value="auto">自動（{catalog?.categories?.chat?.model ?? "既定"}）</option>
@@ -177,6 +207,15 @@ export default function ChatView() {
               </optgroup>
             ))}
           </select>
+          <button
+            type="button"
+            onClick={() => resetSecret(!secret)}
+            aria-pressed={!!secret}
+            className={`flex min-h-10 items-center gap-1 rounded-lg border px-2.5 text-xs ${secret ? "border-violet-500/40 bg-violet-500/10 text-violet-200" : "border-slate-700 text-slate-400"}`}
+            title="オンの間の会話は履歴に保存せず、解除や再読み込みで添付・作成ファイルごと消す"
+          >
+            <EyeOff size={14} aria-hidden="true" /> シークレット
+          </button>
           <button
             type="button"
             onClick={() => setTools((v) => !v)}
@@ -201,8 +240,8 @@ export default function ChatView() {
           <div className="mx-auto max-w-3xl space-y-5 px-4 py-6">
             {!conv?.messages.length && (
               <div className="pt-16 text-center">
-                <p className="text-lg font-semibold text-slate-100">何でも聞いてください</p>
-                <p className="mt-1 text-sm text-slate-500">ローカルLLMと会話します。「ツールあり」ならファイル作成やWeb調査も実際に行います。</p>
+                <p className="text-lg font-semibold text-slate-100">{secret ? "シークレットモード" : "何でも聞いてください"}</p>
+                <p className="mt-1 text-sm text-slate-500">{secret && "この会話は履歴に残りません。"}ローカルLLMと会話します。「ツールあり」ならファイル作成やWeb調査も実際に行います。</p>
               </div>
             )}
             {conv?.messages.map((m, i) => (
