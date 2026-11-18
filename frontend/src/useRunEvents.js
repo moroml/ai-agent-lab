@@ -152,8 +152,9 @@ function applyEvent(state, ev) {
     case "artifacts":
       return { ...state, artifacts: ev.artifacts };
     case "run_finished":
+      // 終わったRunは会話を続けられる(開き直したときにサーバーが返す resumable と揃える)
       return { ...state, running: false, finished: true, finishError: ev.error ?? null,
-               liveFinished: state.liveFinished + 1 };
+               resumable: true, liveFinished: state.liveFinished + 1 };
     default:
       return state;
   }
@@ -184,7 +185,7 @@ function reducer(state, action) {
  * runId のSSEを購読し、{state, speeds} を返す。
  * speeds: { [nodeId]: { tps, stalled } } — 1秒間隔で更新(t/s計測とStalled検知)。
  */
-export function useRunEvents(runId) {
+export function useRunEvents(runId, epoch = 0) {
   const [state, dispatch] = useReducer(reducer, initialRunState);
   const [speeds, setSpeeds] = useState({});
   const bufferRef = useRef([]);
@@ -196,8 +197,12 @@ export function useRunEvents(runId) {
   const nodesRef = useRef(state.nodes);
   nodesRef.current = state.nodes;
 
+  // epoch: 完了済みRunに続きを送ったときに呼び出し側が進める。完了済みRunの購読は記録を1回
+  // 受け取るだけなので、つなぎ直さないと新しい実行の進行が届かない(表示は消さずに差し替える)
+  const shownRunRef = useRef(null);
   useEffect(() => {
-    dispatch({ type: "clear" });
+    if (shownRunRef.current !== runId) dispatch({ type: "clear" });
+    shownRunRef.current = runId;
     bufferRef.current = [];
     speedRef.current = {};
     setSpeeds({});
@@ -230,7 +235,7 @@ export function useRunEvents(runId) {
       es.close();
       clearInterval(flush);
     };
-  }, [runId]);
+  }, [runId, epoch]);
 
   // t/s と Stalled の定期評価(1秒間隔)。nodes は ref 経由で読む(deps を空にして
   // interval をストリーミング中も1秒ごとに確実に発火させる)

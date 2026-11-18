@@ -19,7 +19,7 @@ const TEXTAREA_MAX_PX = 128; // max-h-32 (8rem) と揃える
  *   answer ノード        → その回の結果(エージェント)
  * 送信すると同じRun・同じワークスペースの続きとして実行される。
  */
-export default function ChatPanel({ runId, nodes, order, running, resumable, runStatus, onSent, onStartDraft }) {
+export default function ChatPanel({ runId, nodes, order, running, resumable, runStatus, makesFiles = true, onSent, onStartDraft }) {
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
@@ -101,7 +101,9 @@ export default function ChatPanel({ runId, nodes, order, running, resumable, run
       ? "待機中 — 開始後に追加指示を送れます"
       : deadEnd
         ? "このRunは継続できません — 新しいタスクとして始められます"
-        : "成果物への追加指示(例: 難易度を上げて / 色を変えて / スコア表示を追加して)";
+        : makesFiles
+          ? "成果物への追加指示(例: 難易度を上げて / 色を変えて / スコア表示を追加して)"
+          : "続けて質問・指示を送る(例: もっと短く / 具体例を足して / 3つに絞って)";
 
   return (
     <section className="border-t border-slate-800 bg-slate-900">

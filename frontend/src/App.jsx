@@ -62,7 +62,8 @@ export default function App() {
   // 連続で2件開始しても先発の楽観行が消えないよう配列で持つ
   const [optimisticRuns, setOptimisticRuns] = useState([]);
 
-  const { state, speeds } = useRunEvents(currentId);
+  const [streamEpoch, setStreamEpoch] = useState(0);
+  const { state, speeds } = useRunEvents(currentId, streamEpoch);
   const [runsLoaded, setRunsLoaded] = useState(false);   // 初回取得前は「0件」と誤表示しない
 
   useEffect(() => {
@@ -180,6 +181,9 @@ export default function App() {
     : null;
 
   const answerNode = [...agentNodes].reverse().find((n) => n.kind === "answer" && n.output);
+  // 最新の続きの質問(追加指示)。回答より後に出ていれば、その答えはまだ作っている途中
+  const askNode = [...agentNodes].reverse().find((n) => n.kind === "coder" && n.detail && n.title?.startsWith("🛠 追加指示"));
+  const askPending = !!askNode && agentNodes.indexOf(askNode) > agentNodes.indexOf(answerNode);
 
   // TaskInput へ渡す runs は同一性を保つ(毎レンダー作り直すと memo が効かない)
   const taskInputRuns = useMemo(
@@ -623,7 +627,13 @@ export default function App() {
                 <PhaseStepper nodes={agentNodes} />
                 {answerNode && (
                   <section className="mb-5 rounded-xl border border-slate-700 bg-slate-900 p-4">
-                    <h2 className="mb-3 text-lg font-bold">最終回答</h2>
+                    <h2 className="mb-3 text-lg font-bold">{askPending ? "前の回答" : askNode ? "回答" : "最終回答"}</h2>
+                    {askNode && (
+                      <p className="mb-3 whitespace-pre-wrap break-words rounded-lg bg-slate-800 px-3 py-2 text-sm text-slate-200">
+                        <span className="text-slate-400">続きの質問: </span>{askNode.detail}
+                        {askPending && <span role="status" className="ml-2 text-slate-400">— 回答を作成しています…</span>}
+                      </p>
+                    )}
                     {/* 生成中は Markdown を毎回再パースせず素テキストで出す
                         (LogDrawer 等と同じ方式。完了時に整形表示へ切り替わる) */}
                     {answerNode.status === "done" ? (
@@ -693,7 +703,8 @@ export default function App() {
                 running={state.running}
                 resumable={state.resumable}
                 runStatus={currentRun?.status}
-                onSent={refreshRuns}
+                makesFiles={currentRun?.mode === "code" || currentRun?.mode === "swarm-code"}
+                onSent={() => { setStreamEpoch((n) => n + 1); refreshRuns(); }}
                 onStartDraft={(text) => handleNewTask(text || undefined)}
               />}
             </>
