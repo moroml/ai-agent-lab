@@ -328,6 +328,9 @@ async def start_run(req: RunRequest) -> dict:
     # Claudeレビューは成果物ファイルを直接直す工程なので、ファイルを作るモードのみ
     claude_on = req.claude_review and mode in ("code", "swarm-code")
     max_iter = max(1, min(int(req.max_iter or 18), 200))
+    # 添付の説明はモデルへ渡す文にだけ足す。run.task (見出し・履歴) には載せない。
+    # Run を作る前に読んでおく (ここで失敗しても作りかけの Run が残らない)
+    note = (await asyncio.to_thread(attach.describe, req.attach))["describe"] if req.attach else ""
     run = manager.create(task, mode, model, reviewer,
                          approve=req.approve, max_iter=max_iter, hybrid=hybrid,
                          critique=req.critique, deliverable=deliverable,
@@ -335,7 +338,9 @@ async def start_run(req: RunRequest) -> dict:
                          api_review=req.api_review and mode in ("code", "swarm-code"),
                          gen_override=gen_override, pinned=pinned)
     if req.attach:
+        run.attach = req.attach
         await asyncio.to_thread(attach.materialize, req.attach, Path(PROJECTS_DIR) / f"run_{run.id}")
+        task = f"{task}\n\n{note}"
 
     def factory():
         if run.mode == "cascade":

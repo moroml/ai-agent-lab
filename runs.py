@@ -104,6 +104,7 @@ class Run:
         # モデル明示指定 (pinned): 公式のモデル選択と同じ単独実行にする印。
         # カスケード格上げ・planner 差し替え・回答キャッシュを無効化する
         self.pinned = pinned
+        self.attach: str | None = None   # 添付 (attach.py の batch)。再実行で同じ添付を渡すために残す
         # 表示用の実モデル名(qwen3:30b 等)。キーだけだと何のモデルか分からないため
         try:
             import llm as _llm
@@ -157,6 +158,7 @@ class Run:
             "critique": self.critique,
             "claude_review": self.claude_review,
             "api_review": self.api_review,
+            "attach": self.attach,
             "deliverable": self.deliverable,
             "max_iter": self.max_iter,
             "status": self.status(),
@@ -506,6 +508,7 @@ class RunManager:
                   data.get("hybrid", False), data.get("critique", False),
                   data.get("deliverable"), data.get("claude_review", False), data.get("api_review", False))
         run.id = run_id
+        run.attach = data.get("attach")
         run.created_at = data.get("created_at", run.created_at)
         from agent import _patch_dangling_tool_calls
         run.history = _patch_dangling_tool_calls(data.get("history") or [])

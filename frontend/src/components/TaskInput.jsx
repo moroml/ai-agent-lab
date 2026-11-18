@@ -2,7 +2,7 @@ import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { Play, Loader2, X, Sparkles, ChevronRight, History } from "lucide-react";
 import { modelStatusLine, modelStatusNote, RUN_STATUS, fmtElapsed } from "../derive.js";
 import ModelPicker from "./ModelPicker.jsx";
-import { AttachBar, DropZone, useAttach, withAttach } from "./Attach.jsx";
+import { AttachBar, DropZone, useAttach } from "./Attach.jsx";
 
 // 進め方(mode)と成果物形式(deliverable)はメインエージェントが自動で決めるため、
 // UIには枠を置かない。ユーザーはタスクとモデルだけ決めればよい。
@@ -73,8 +73,9 @@ function TaskInput({ models, onStart, prefill, onCancel, visible, suggestions = 
     setError(null);
     try {
       // mode / deliverable は送らない(auto = メインエージェントが決める)
-      // 添付は Run の作業フォルダ inputs/ に写され、本文には置き場所と小さいテキストの中身が付く
-      await onStart({ task: withAttach(task.trim(), att), attach: att.ready ? att.state.batch : null,
+      // 添付は Run の作業フォルダ inputs/ に写される。置き場所と中身の説明はサーバーがモデル向けの文にだけ足す
+      // (ここで task に連結すると、見出しや履歴に添付の全文が出てしまう)
+      await onStart({ task: task.trim(), attach: att.ready ? att.state.batch : null,
                       model, critique, approve,
                       max_iter: maxIter, allow_ram: allowRam,
                       claude_review: claudeReview, api_review: apiReview,

@@ -408,7 +408,7 @@ export default function App() {
       return;
     }
     handleStart({
-      task: currentRun.task, mode: currentRun.mode, model: currentRun.model,
+      task: currentRun.task, attach: currentRun.attach ?? null, mode: currentRun.mode, model: currentRun.model,
       critique: currentRun.critique, approve: currentRun.approve, max_iter: currentRun.max_iter,
       deliverable: currentRun.deliverable ?? "auto",
       claude_review: !!currentRun.claude_review,
