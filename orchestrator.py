@@ -917,16 +917,17 @@ _RESEARCH_STEPS = 4        # LLM 呼び出しの上限
 _RESEARCH_CHARS = 8000     # 依頼文に添える調査結果の上限
 
 
-async def _web_research(bus, root_id: str, cfg, key: str, task: str) -> str:
+async def _web_research(bus, root_id: str, cfg, key: str, task: str, history=()) -> str:
     """Web での確認が要る依頼なら調べ、結果を添えた依頼文を返す (不要・不可なら task のまま)。
 
     文章で答える経路 (direct / cascade) はツールを持たないため、回答の前段で調べて材料として渡す。
-    無効化は models.yaml の web_research: false。
+    history は続きの質問のときのこれまでのやりとり (何を指す質問かを調査側が分かるように渡す)。
+    無効化は models.yaml の web_research: false。調査の失敗では Run を止めない。
     """
     if not (cfg.get("web_research", True) and llm.resolve(cfg, key)["tools"]):
         return task
     today = datetime.date.today().isoformat()
-    msgs = [{"role": "system", "content": _RESEARCH_SYSTEM},
+    msgs = [{"role": "system", "content": _RESEARCH_SYSTEM}, *history,
             {"role": "user", "content": f"今日の日付: {today}\n\n{task}"}]
     node_id, found = None, []
     try:
@@ -953,7 +954,7 @@ async def _web_research(bus, root_id: str, cfg, key: str, task: str) -> str:
                 result = str(await chat_agent.call_tool(None, name, args))
                 msgs.append({"role": "tool", "tool_name": name, "content": result})
                 found.append(f"[{name}: {label}]\n{result[:3000]}")
-    except llm.OllamaError as e:
+    except Exception as e:
         if node_id is not None:
             bus.emit_log(node_id, f"[Web 調査] 途中で失敗しました: {e}")
     if not found:
@@ -1055,7 +1056,7 @@ class DirectOrchestrator:
             ask_id = bus.create_node("coder", f"{FOLLOW_UP_TITLE}: {message[:40]}", message, root_id)
             bus.complete(ask_id, "続きの質問を受け付けました")
             messages.append({"role": "user", "content": await _web_research(
-                bus, root_id, self.cfg, self.model, message)})
+                bus, root_id, self.cfg, self.model, message, history=messages[1:])})
             answer_id = bus.create_node("answer", "⭐ 追加指示への対応", "", root_id)
             await self._answer(answer_id, messages)
             bus.complete(root_id, "追加指示への対応が完了しました")

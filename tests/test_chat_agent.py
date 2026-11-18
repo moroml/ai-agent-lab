@@ -109,3 +109,17 @@ def test_research_ignores_unknown_tool_and_can_be_disabled(monkeypatch):
     assert out == "今日のニュースは？"
     out, calls, _ = research(monkeypatch, [], cfg={"models": {}, "web_research": False})
     assert out == "今日のニュースは？" and calls == []
+
+
+def test_research_gets_history_and_survives_errors(monkeypatch):
+    seen = []
+
+    async def chat(cfg, key, messages, **kw):
+        seen.append([m["role"] for m in messages])
+        raise RuntimeError("boom")
+    monkeypatch.setattr(llm, "chat", chat)
+    from events import EventBus
+    bus = EventBus()
+    hist = [{"role": "user", "content": "A社について"}, {"role": "assistant", "content": "A社は…"}]
+    out = asyncio.run(_web_research(bus, bus.create_node("task", "t", ""), {"models": {}}, "m", "株価は？", history=hist))
+    assert out == "株価は？" and seen == [["system", "user", "assistant", "user"]]

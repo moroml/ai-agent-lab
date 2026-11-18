@@ -20,6 +20,6 @@ def _no_real_gpu_switch(monkeypatch):
 @pytest.fixture(autouse=True)
 def _no_real_web_research(monkeypatch):
     """文章回答の前段の Web 調査で、テストから本物の LLM と Web を呼ばない。"""
-    async def skip(bus, root_id, cfg, key, task):
+    async def skip(bus, root_id, cfg, key, task, history=()):
         return task
     monkeypatch.setattr(orchestrator, "_web_research", skip)
