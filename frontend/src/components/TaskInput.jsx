@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
-import { Play, Loader2, X, Sparkles, ChevronRight, History } from "lucide-react";
+import { Play, Loader2, X, Sparkles, ChevronRight, History, EyeOff } from "lucide-react";
 import { modelStatusLine, modelStatusNote, RUN_STATUS, fmtElapsed } from "../derive.js";
 import ModelPicker from "./ModelPicker.jsx";
 import { AttachBar, DropZone, useAttach } from "./Attach.jsx";
@@ -21,7 +21,7 @@ const DEFAULTS = { model: "auto", critique: false, approve: true, maxIter: 18, a
  * onCancel: 下書きをやめて直前のRunへ戻る(戻り先が無ければ App が null を渡す)
  * suggestions: 空欄時に出す開始チップ [{emoji?, text}](直近タスク+サンプル)
  */
-function TaskInput({ models, onStart, prefill, onCancel, visible, suggestions = [], runs = [], onSelectRun, onModelsChanged }) {
+function TaskInput({ models, onStart, prefill, onCancel, visible, suggestions = [], runs = [], onSelectRun, onModelsChanged, secret = false, onSecretChange }) {
   const [task, setTask] = useState("");
   const taskRef = useRef(null);
   const [model, setModel] = useState(DEFAULTS.model);
@@ -78,7 +78,7 @@ function TaskInput({ models, onStart, prefill, onCancel, visible, suggestions = 
       await onStart({ task: task.trim(), attach: att.ready ? att.state.batch : null,
                       model, critique, approve,
                       max_iter: maxIter, allow_ram: allowRam,
-                      claude_review: claudeReview, api_review: apiReview,
+                      claude_review: claudeReview && !secret, api_review: apiReview && !secret,
                       think: think === "auto" ? null : think === "on" });
       setTask("");   // 実行を開始したら入力を空に戻す(ビュー切替は App 側)
       att.clear();
@@ -232,10 +232,20 @@ function TaskInput({ models, onStart, prefill, onCancel, visible, suggestions = 
             </span>
           )}
 
+          {/* シークレット: 記録・キャッシュを残さず、解除・画面を閉じるとフォルダごと消す(外部レビューは使えない) */}
+          <button
+            type="button"
+            onClick={() => onSecretChange?.(!secret)}
+            aria-pressed={secret}
+            title="記録・回答キャッシュを残さず、解除・画面を閉じると作業フォルダごと消します。外部レビューは使えません"
+            className={`ml-auto flex min-h-9 items-center gap-1 rounded-lg border px-2.5 text-xs ${secret ? "border-violet-500/40 bg-violet-500/10 text-violet-200" : "border-slate-700 text-slate-400"}`}
+          >
+            <EyeOff size={14} aria-hidden="true" /> シークレット
+          </button>
           <button
             onClick={submit}
             disabled={busy || att.busy || !task.trim()}
-            className="ml-auto flex items-center gap-1.5 rounded-md bg-green-600 px-5 py-2 text-sm font-semibold text-white transition-colors hover:bg-green-500 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-500"
+            className="flex items-center gap-1.5 rounded-md bg-green-600 px-5 py-2 text-sm font-semibold text-white transition-colors hover:bg-green-500 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-500"
           >
             {busy ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
             実行
@@ -321,7 +331,7 @@ function TaskInput({ models, onStart, prefill, onCancel, visible, suggestions = 
                 </span>
               </label>
               <label className={`flex items-start gap-2 ${claude?.available ? "cursor-pointer" : "cursor-not-allowed opacity-60"}`}>
-                <input type="checkbox" checked={claudeReview} disabled={!claude?.available}
+                <input type="checkbox" checked={claudeReview} disabled={!claude?.available || secret}
                        onChange={(e) => setClaudeReview(e.target.checked)}
                        className="mt-0.5 accent-orange-500" />
                 <span>
@@ -336,7 +346,7 @@ function TaskInput({ models, onStart, prefill, onCancel, visible, suggestions = 
                 </span>
               </label>
               <label className={`flex items-start gap-2 ${api?.available ? "cursor-pointer" : "cursor-not-allowed opacity-60"}`}>
-                <input type="checkbox" checked={apiReview} disabled={!api?.available}
+                <input type="checkbox" checked={apiReview} disabled={!api?.available || secret}
                        onChange={(e) => setApiReview(e.target.checked)}
                        className="mt-0.5 accent-cyan-500" />
                 <span>

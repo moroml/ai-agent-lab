@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
-import { Plus, Search, Sparkles, Trash2, X, Gauge, Microscope, Plug } from "lucide-react";
+import { EyeOff, Plus, Search, Sparkles, Trash2, X, Gauge, Microscope, Plug } from "lucide-react";
 import { RUN_STATUS, fmtAgo } from "../derive.js";
 
 /**
@@ -85,6 +85,11 @@ function Sidebar({
           </div>
           <div className="mt-1 flex items-center gap-1.5 pl-4 text-[11.5px] text-slate-400">
             <span className={meta.text}>{meta.label}</span>
+            {r.secret && (
+              <span className="flex items-center gap-0.5 text-violet-300" title="シークレット: 保存されず、解除・画面を閉じると消えます">
+                <EyeOff size={11} aria-hidden="true" />シークレット
+              </span>
+            )}
             <span className="ml-auto shrink-0 tabular-nums">{fmtAgo(r.created_at)}</span>
             {finished && (
               <button

@@ -34,6 +34,10 @@ export const cancelRun = (runId) =>
 export const deleteRun = (runId) =>
   fetch(`/run/${runId}`, { method: "DELETE" }).then(jsonOrThrow);
 
+// シークレットRunの破棄(実行中なら中断して作業フォルダごと消す)。画面を閉じる途中でも届くよう keepalive で送る
+export const discardRun = (runId) =>
+  fetch(`/run/${runId}`, { method: "DELETE", keepalive: true }).catch(() => {});
+
 export const continueRun = (runId, message) =>
   fetch(`/run/${runId}/continue`, {
     method: "POST",

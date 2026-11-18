@@ -20,7 +20,7 @@ const ConnectionsView = lazy(() => import("./components/ConnectionsView.jsx"));
 const viewFallback = <div className="p-6 text-sm text-slate-400">読み込み中…</div>;
 import { useRunEvents } from "./useRunEvents.js";
 import { deriveAgentState, dependencyOf, segmentByPhase, PHASE_META } from "./derive.js";
-import { fetchRuns, fetchModels, fetchHealth, fetchGpu, startRun, cancelRun, deleteRun, startBench } from "./api.js";
+import { fetchRuns, fetchModels, fetchHealth, fetchGpu, startRun, cancelRun, deleteRun, discardRun, startBench } from "./api.js";
 
 const DEFAULT_TITLE = "ai-agent-lab";
 
@@ -62,6 +62,12 @@ export default function App() {
   // 連続で2件開始しても先発の楽観行が消えないよう配列で持つ
   const [optimisticRuns, setOptimisticRuns] = useState([]);
 
+  // シークレット: このページで開始したシークレットRunのID。state/storage には載せず、
+  // 解除・画面を閉じる・離れるでサーバーの作業フォルダごと消す
+  const [secret, setSecret] = useState(false);
+  const secretRuns = useRef(new Set());
+  const discarded = useRef(new Set());
+
   const [streamEpoch, setStreamEpoch] = useState(0);
   const { state, speeds } = useRunEvents(currentId, streamEpoch);
   const [runsLoaded, setRunsLoaded] = useState(false);   // 初回取得前は「0件」と誤表示しない
@@ -75,7 +81,7 @@ export default function App() {
   // 取得失敗を「タスクが0件」と見せない。runsError のときは接続できない旨と再試行を出す
   const [runsError, setRunsError] = useState(false);
   const refreshRuns = useCallback(() => fetchRuns()
-    .then((d) => { setRuns(d.runs); setRunsError(false); })
+    .then((d) => { setRuns(d.runs.filter((r) => !discarded.current.has(r.id))); setRunsError(false); })
     .catch(() => setRunsError(true))
     .finally(() => setRunsLoaded(true)), []);
   const refreshModels = useCallback(() => fetchModels().then(setModels).catch(() => {}), []);
@@ -214,7 +220,7 @@ export default function App() {
     const recent = [];
     for (const r of runsView) {
       const t = (r.task || "").trim();
-      if (!t || seen.has(t)) continue;
+      if (!t || r.secret || seen.has(t)) continue;
       seen.add(t);
       recent.push({ emoji: "🕘", text: t });
       if (recent.length >= 3) break;
@@ -222,6 +228,34 @@ export default function App() {
     const fill = SAMPLE_TASKS.filter((s) => !seen.has(s.text)).slice(0, Math.max(0, 3 - recent.length));
     return [...recent, ...fill];
   }, [runsView]);
+
+  // シークレットRunを全て破棄し、一覧・選択・計画から落とす
+  const discardSecretRuns = useCallback(() => {
+    const ids = [...secretRuns.current];
+    if (!ids.length) return;
+    secretRuns.current.clear();
+    ids.forEach((id) => { discarded.current.add(id); discardRun(id); });
+    const gone = (r) => ids.includes(r.id);
+    setRuns((rs) => rs.filter((r) => !gone(r)));
+    setOptimisticRuns((l) => l.filter((r) => !gone(r)));
+    setPlans((m) => Object.fromEntries(Object.entries(m).filter(([k]) => !ids.includes(k))));
+    setPrefill((p) => (p?.secret ? null : p));
+    setView((v) => {
+      if (v.kind === "run" && ids.includes(v.id)) return { kind: "empty" };
+      if ((v.kind === "draft" || v.kind === "bench") && ids.includes(v.from)) return { ...v, from: null };
+      return v;
+    });
+  }, []);
+  const handleSecretChange = useCallback((on) => {
+    setSecret(on);
+    if (!on) discardSecretRuns();
+  }, [discardSecretRuns]);
+  // 画面を閉じる・再読み込み・エージェント画面を離れるときも消す
+  useEffect(() => {
+    const drop = () => { secretRuns.current.forEach((id) => discardRun(id)); };
+    window.addEventListener("pagehide", drop);
+    return () => { window.removeEventListener("pagehide", drop); drop(); };
+  }, []);
 
   // ---- 通知(レイアウトシフトさせず右下に積む) ----
   const dismissNotice = useCallback(
@@ -351,8 +385,9 @@ export default function App() {
 
   // ---- アクション ----
   // T3: 実行成功で初めて選択が新Runへ移る。失敗時は下書きに留まる(TaskInput側でエラー表示)
-  const handleStart = async (payload) => {
-    const res = await startRun(payload);
+  const handleStart = async (payload, asSecret = secret) => {
+    const res = await startRun(asSecret ? { ...payload, secret: true, claude_review: false, api_review: false } : payload);
+    if (asSecret) secretRuns.current.add(res.run_id);
     setPrefill(null);
     // メインエージェントが決めた進め方・成果物・モデルをRunごとに保持し、実行条件に常設表示する
     setPlans((m) => ({ ...m, [res.run_id]: res }));
@@ -362,7 +397,7 @@ export default function App() {
       created_at: Date.now() / 1000, mode: res.mode, deliverable: res.deliverable,
       model: res.model, model_tag: res.model_tag, pending_approvals: 0, tokens: 0,
       max_iter: payload.max_iter, approve: payload.approve, critique: payload.critique,
-      claude_review: res.claude_review,
+      claude_review: res.claude_review, secret: asSecret,
     }, ...list]);
     setView({ kind: "run", id: res.run_id });
     refreshRuns();
@@ -417,7 +452,7 @@ export default function App() {
       deliverable: currentRun.deliverable ?? "auto",
       claude_review: !!currentRun.claude_review,
       api_review: !!currentRun.api_review,
-    }).catch(notifyError);   // Ollama未起動・モデル未導入・RAM不足の理由はここに出る
+    }, !!currentRun.secret).catch(notifyError);   // Ollama未起動・モデル未導入・RAM不足の理由はここに出る
   };
 
   // T7: 設定変更して再実行 → 設定を引き継いだ下書きへ遷移(キャンセルで元のRunに戻れる)
@@ -427,6 +462,7 @@ export default function App() {
       handleOpenBench(benchConfigOf(currentRun));
       return;
     }
+    if (currentRun.secret) setSecret(true);   // シークレットの再実行はシークレットのまま
     setPrefill({ ...currentRun, _inherit: true });
     setView({ kind: "draft", from: currentRun.id });
   };
@@ -434,6 +470,7 @@ export default function App() {
   const handleDelete = (id) => {
     deleteRun(id)
       .then(() => {
+        secretRuns.current.delete(id);
         setView((v) => {
           if (v.kind === "run" && v.id === id) return { kind: "empty" };
           if ((v.kind === "draft" || v.kind === "bench") && v.from === id) return { ...v, from: null };
@@ -547,6 +584,8 @@ export default function App() {
               runs={taskInputRuns}
               onSelectRun={selectRun}
               onModelsChanged={refreshModels}
+              secret={secret}
+              onSecretChange={handleSecretChange}
             />
           </div>
 
