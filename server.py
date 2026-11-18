@@ -36,6 +36,7 @@ import system
 from artifacts import WORKSPACE as ARTIFACT_DIR
 from orchestrator import (CascadeOrchestrator, CodeOrchestrator, CritiqueOrchestrator,
                           DirectOrchestrator, Orchestrator, SwarmCodeOrchestrator)
+from artifacts import SECRET_PREFIX
 from runs import manager, normalize_snapshot
 from tools import WORKSPACE as PROJECTS_DIR
 
@@ -68,6 +69,8 @@ try:
         print(f"[recover] 前回中断のRun {_n}件を interrupted として確定")
 except OSError as _e:
     print(f"[recover] 失敗(継続): {_e}")
+# 起動時: 前回のシークレットRunの作業・成果物フォルダを消す
+manager.sweep_secret()
 
 STATIC = Path(__file__).parent / "static"
 STATIC_REACT = Path(__file__).parent / "static-react"  # 新UI(frontend/ のビルド成果物)
@@ -115,6 +118,7 @@ class RunRequest(BaseModel):
     allow_ram: bool = False        # True でRAM併用の大型モデルも使う(既定はVRAMのみ)
     claude_review: bool = False
     api_review: bool = False      # 完了後に環境変数設定済みの任意APIモデルがレビュー
+    secret: bool = False          # シークレット: 記録・回答キャッシュを残さず、破棄時に作業フォルダごと消す
     temperature: float | None = None   # 生成温度の Run 単位上書き (未指定ならモデル既定)
     max_tokens: int | None = None      # 生成上限トークンの Run 単位上書き (同上)
     think: bool | None = None          # 思考生成の Run 単位指定 (None=モデル既定, True=あり, False=なし)
@@ -227,6 +231,8 @@ async def start_run(req: RunRequest) -> dict:
         raise HTTPException(400, f"mode は 'auto' か {MODES} のいずれか")
     if req.deliverable not in DELIVERABLES:
         raise HTTPException(400, f"deliverable は {DELIVERABLES} のいずれか")
+    if req.secret and (req.claude_review or req.api_review):
+        raise HTTPException(400, "シークレットでは外部サービスへ送るレビュー(Claude/任意API)を使えません")
     if req.temperature is not None and not 0.0 <= req.temperature <= 2.0:
         raise HTTPException(400, "temperature は 0.0〜2.0 の範囲で指定してください")
     if req.max_tokens is not None and not 1 <= req.max_tokens <= 65536:
@@ -336,10 +342,12 @@ async def start_run(req: RunRequest) -> dict:
                          critique=req.critique, deliverable=deliverable,
                          claude_review=claude_on,
                          api_review=req.api_review and mode in ("code", "swarm-code"),
-                         gen_override=gen_override, pinned=pinned)
+                         gen_override=gen_override, pinned=pinned, secret=req.secret)
     if req.attach:
         run.attach = req.attach
         await asyncio.to_thread(attach.materialize, req.attach, Path(PROJECTS_DIR) / f"run_{run.id}")
+        if run.secret:   # 写し終えた元の添付を残さない (追加指示では写し済みの inputs/ を使う)
+            await asyncio.to_thread(shutil.rmtree, attach.STORE / req.attach, True)
         task = f"{task}\n\n{note}"
 
     def factory():
@@ -463,6 +471,10 @@ async def cancel_run(run_id: str) -> dict:
 
 @app.delete("/run/{run_id}")
 async def delete_run(run_id: str) -> dict:
+    if run_id.startswith(SECRET_PREFIX):   # シークレット: 実行中でも中断して破棄する
+        if not await manager.discard_secret(run_id):
+            raise HTTPException(404, "指定されたタスクが見つかりません")
+        return {"status": "deleted"}
     result = manager.delete(run_id)
     if result == "running":
         raise HTTPException(409, "実行中のタスクは削除できません(先に中断してください)")
@@ -499,7 +511,7 @@ async def continue_run(run_id: str, req: ContinueRequest) -> dict:
     message = req.message.strip()
     if not message:
         raise HTTPException(400, "message が空です")
-    if manager.get_live(run_id) is not None:
+    if manager.is_active(run_id):
         raise HTTPException(409, "実行中のタスクには追加指示を送れません(完了後に送信してください)")
     if not await llm.is_alive():
         raise HTTPException(503, "Ollamaが起動していません(左の「エンジン」画面で起動してください)")
@@ -671,7 +683,7 @@ async def events(run_id: str) -> StreamingResponse:
         try:
             first = bus.full_snapshot()
             first["mode"] = mode
-            first["resumable"] = False  # ライブ中(実行中/待機中)は継続不可
+            first["resumable"] = not manager.is_active(run_id)  # 実行中/待機中は継続不可
             yield f"data: {json.dumps(first, ensure_ascii=False)}\n\n"
             while True:
                 try:

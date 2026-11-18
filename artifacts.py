@@ -14,6 +14,7 @@ from pathlib import Path
 # exe化(PyInstaller)時はexeの隣、通常実行時はこのファイルの隣にworkspaceを作る
 _BASE = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).parent
 WORKSPACE = _BASE / "workspace"
+SECRET_PREFIX = "secret-"   # シークレットRunのID頭。作業・成果物フォルダ名に残し、破棄時と起動時に消す
 
 EXT_MAP = {
     "python": "py", "py": "py", "javascript": "js", "js": "js",
@@ -101,8 +102,11 @@ def save_artifacts(task: str, final: str, run_id: str = "",
     if not files:
         return []
 
-    prefix = f"{run_id}_" if run_id else time.strftime("%Y%m%d-%H%M%S_")
-    run_dir = WORKSPACE / f"{prefix}{_safe_name(task)}"
+    if run_id.startswith(SECRET_PREFIX):
+        run_dir = WORKSPACE / run_id   # タスク文をフォルダ名に残さない
+    else:
+        prefix = f"{run_id}_" if run_id else time.strftime("%Y%m%d-%H%M%S_")
+        run_dir = WORKSPACE / f"{prefix}{_safe_name(task)}"
     run_dir.mkdir(parents=True, exist_ok=True)
 
     saved: list[dict] = []

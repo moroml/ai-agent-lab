@@ -55,7 +55,7 @@ def put(task: str, model: str, mode: str, answer: str, run_id: str = "") -> None
 async def wrap(run, task: str, coro) -> None:
     """factory のコルーチンを包む: ヒット時は即返し、ミス時は完了後に保存する。"""
     bus = run.bus
-    if run.mode not in ELIGIBLE_MODES:
+    if run.mode not in ELIGIBLE_MODES or run.secret:   # シークレットは読み書きとも対象外
         await coro
         return
     hit = get(task, run.model, run.mode)

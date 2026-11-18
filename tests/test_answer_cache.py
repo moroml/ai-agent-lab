@@ -63,6 +63,7 @@ class FakeRun:
         self.mode = mode
         self.model = model
         self.id = "run-x"
+        self.secret = False
 
 
 def test_wrap_hit_returns_without_running(tmp_path, monkeypatch):

@@ -11,23 +11,26 @@ import asyncio
 import copy
 import json
 import re
+import shutil
 import threading
 import time
 import uuid
 from pathlib import Path
 
-from artifacts import _BASE
+from artifacts import _BASE, SECRET_PREFIX, WORKSPACE as ARTIFACT_DIR
+from tools import WORKSPACE as _PROJECTS
 from events import EventBus
 
 RUNS_DIR = _BASE / "runs"
+PROJECTS_DIR = Path(_PROJECTS)
 
 MAX_CONCURRENT = 3
 APPROVAL_TIMEOUT = 900   # 承認待ちの上限秒。放置時は自動却下(スロット飢餓の防止)
 CHECKPOINT_SEC = 10      # 実行中Runの定期スナップショット間隔(プロセス死対策)
 
-# run_id は uuid4().hex[:10]。URLパラメータをそのままパスに連結するため形式検証する
-# (Windows では ..%5C.. がディレクトリ外のファイル読取/削除に化けるのを防ぐ)。
-_RUN_ID_RE = re.compile(r"^[0-9a-f]{6,32}$")
+# run_id は uuid4().hex[:10](シークレットRunは頭に secret-)。URLパラメータをそのまま
+# パスに連結するため形式検証する(Windows では ..%5C.. がディレクトリ外のファイル読取/削除に化けるのを防ぐ)。
+_RUN_ID_RE = re.compile(rf"^(?:{SECRET_PREFIX})?[0-9a-f]{{6,32}}$")
 
 
 def _valid_id(run_id: str) -> bool:
@@ -83,8 +86,12 @@ class Run:
                  reviewer_model: str | None = None, approve: bool = True,
                  max_iter: int = 18, hybrid: bool = False, critique: bool = False,
                  deliverable: str | None = None, claude_review: bool = False, api_review: bool = False,
-                 gen_override: dict | None = None, pinned: bool = False):
-        self.id = uuid.uuid4().hex[:10]
+                 gen_override: dict | None = None, pinned: bool = False,
+                 secret: bool = False):
+        # シークレット: 記録(runs/*.json)・回答キャッシュを残さず、終了後もメモリ(live)にだけ置く。
+        # 作業/成果物フォルダは名前の secret- で識別し、破棄時と起動時に消す
+        self.secret = secret
+        self.id = (SECRET_PREFIX if secret else "") + uuid.uuid4().hex[:10]
         self.task = task
         self.mode = mode                  # orchestra / critique / code / swarm-code / bench
         self.model = model                # models.yaml のキー
@@ -159,6 +166,7 @@ class Run:
             "claude_review": self.claude_review,
             "api_review": self.api_review,
             "attach": self.attach,
+            "secret": self.secret,
             "deliverable": self.deliverable,
             "max_iter": self.max_iter,
             "status": self.status(),
@@ -219,9 +227,11 @@ class RunManager:
                reviewer_model: str | None = None, approve: bool = True,
                max_iter: int = 18, hybrid: bool = False, critique: bool = False,
                deliverable: str | None = None, claude_review: bool = False, api_review: bool = False,
-               gen_override: dict | None = None, pinned: bool = False) -> Run:
+               gen_override: dict | None = None, pinned: bool = False,
+               secret: bool = False) -> Run:
         run = Run(task, mode, model, reviewer_model, approve, max_iter, hybrid,
-                  critique, deliverable, claude_review, api_review, gen_override, pinned)
+                  critique, deliverable, claude_review, api_review, gen_override, pinned,
+                  secret)
         self.live[run.id] = run
         return run
 
@@ -252,6 +262,8 @@ class RunManager:
             # スナップショット構築はイベントループ上(bus/historyの並行変更と競合しない)、
             # json.dumps+書き込みだけをスレッドへ逃がす。1回の失敗でループを止めない。
             # 状態が変わっていない間(承認待ち・長いツール実行)は書き込みを省く。
+            if run.secret:
+                return   # 何も書かない
             last_sig = None
             while True:
                 await asyncio.sleep(CHECKPOINT_SEC)
@@ -294,13 +306,18 @@ class RunManager:
                 ck.cancel()
                 run.reject_pending()
                 await self.persist_async(run)   # 最終保存の書き込みでループを塞がない
-                self.live.pop(run.id, None)  # 以後は runs/*.json から配信(メモリ解放)
+                if not run.secret:   # シークレットは記録が無いので live から配信し続ける
+                    self.live.pop(run.id, None)  # 以後は runs/*.json から配信(メモリ解放)
 
         run.task_obj = asyncio.create_task(_gated())
 
     async def persist_async(self, run: Run, final: bool = True) -> None:
         """persist の非同期版: _encode はループ上で行い、json 化と書き込みだけを
         ワーカースレッドへ逃がす(終了時の最終保存でループを塞がない。監査)。"""
+        if run.secret:
+            if final:
+                run.finished_at = time.time()
+            return
         data = self._encode(run, final)
         await asyncio.to_thread(self._write_record, run, data, final)
 
@@ -330,6 +347,8 @@ class RunManager:
         追い越し上書き(完了済みRunが running 状態の記録に巻き戻る)を拒否する。
         tmp 名はスレッド毎に一意(同名tmpへの同時書き込みはWindowsで共有違反になる)。
         """
+        if run.secret:
+            return
         with run._persist_lock:
             if run._finalized and not final:
                 return
@@ -432,6 +451,11 @@ class RunManager:
     def get_live(self, run_id: str) -> Run | None:
         return self.live.get(run_id)
 
+    def is_active(self, run_id: str) -> bool:
+        """実行中/待機中か。終了済みシークレットRunは live に残るが active ではない。"""
+        run = self.live.get(run_id)
+        return run is not None and not (run.secret and run.finished_at is not None)
+
     @staticmethod
     def _head_finished(path: Path) -> bool | None:
         """記録ファイルの先頭だけ読み、finished_at の有無を判定する。
@@ -498,15 +522,21 @@ class RunManager:
         走らせる形で継続する。中断・失敗ケースの履歴末尾に未応答の tool_calls が
         残っていれば合成応答を補ってから復元する(次のターンが壊れないように)。
         """
-        if run_id in self.live:
+        if self.is_active(run_id):
             return None
-        data = self.get_record(run_id)
+        live = self.live.get(run_id)
+        if live is not None:   # 終了済みシークレット: 記録ファイルが無いのでメモリから復元
+            data = {**live.summary(), "snapshot": live.bus.full_snapshot(),
+                    "history": list(live.history)}
+        else:
+            data = self.get_record(run_id)
         if data is None or data.get("snapshot") is None:
             return None
         run = Run(data["task"], data["mode"], data["model"], data.get("reviewer_model"),
                   data.get("approve", True), data.get("max_iter", 18),
                   data.get("hybrid", False), data.get("critique", False),
-                  data.get("deliverable"), data.get("claude_review", False), data.get("api_review", False))
+                  data.get("deliverable"), data.get("claude_review", False), data.get("api_review", False),
+                  secret=data.get("secret", False))
         run.id = run_id
         run.attach = data.get("attach")
         run.created_at = data.get("created_at", run.created_at)
@@ -516,6 +546,37 @@ class RunManager:
         run.bus = EventBus.from_snapshot(snapshot)
         self.live[run.id] = run
         return run
+
+    @staticmethod
+    def secret_dirs(run_id: str) -> list[Path]:
+        """シークレットRunの作業フォルダと成果物フォルダ(名前に run_id を含む)。"""
+        return [PROJECTS_DIR / f"run_{run_id}", ARTIFACT_DIR / run_id]
+
+    async def discard_secret(self, run_id: str) -> bool:
+        """シークレットRunを中断して live から外し、フォルダを消す。対象が無ければ False。"""
+        if not (_valid_id(run_id) and run_id.startswith(SECRET_PREFIX)):
+            return False
+        run = self.live.get(run_id)
+        self.cancel(run_id)
+        self.live.pop(run_id, None)
+        if run is not None and run.task_obj is not None and not run.task_obj.done():
+            await asyncio.wait({run.task_obj}, timeout=10)   # 中断が反映されてから消す(書き戻し防止)
+        found = run is not None
+        for d in self.secret_dirs(run_id):
+            if d.is_dir():
+                found = True
+                await asyncio.to_thread(shutil.rmtree, d, True)
+        return found
+
+    def sweep_secret(self) -> int:
+        """起動時: 前回プロセスに残ったシークレットRunのフォルダを消す。"""
+        n = 0
+        for base, pat in ((PROJECTS_DIR, f"run_{SECRET_PREFIX}*"), (ARTIFACT_DIR, f"{SECRET_PREFIX}*")):
+            if base.is_dir():
+                for d in base.glob(pat):
+                    shutil.rmtree(d, ignore_errors=True)
+                    n += 1
+        return n
 
     def delete(self, run_id: str) -> str:
         """終了済みRunの記録を削除する。返り値: ok / running / not_found。"""
