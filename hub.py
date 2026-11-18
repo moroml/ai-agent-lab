@@ -419,9 +419,11 @@ async def hub_chat_discard(conv: str, request: Request, batch: str | None = None
 
 
 def sweep_secret() -> None:
-    """画面を閉じる前にサーバーが落ちた等で残ったシークレット会話の作業フォルダを消す。"""
+    """画面を閉じる前にサーバーが落ちた等で残ったシークレット会話の作業フォルダと、シークレットの曲を消す。"""
     for d in Path(WORKSPACE).glob(f"chat_{SECRET_PREFIX}*"):
         shutil.rmtree(d, ignore_errors=True)
+    for f in music.MUSIC_OUT.glob(f"{SECRET_PREFIX}*.mp3"):
+        f.unlink(missing_ok=True)
 
 
 class PrewarmReq(BaseModel):
@@ -511,6 +513,7 @@ class MusicReq(BaseModel):
     instrumental: bool = False
     vocal_language: str | None = None
     title: str | None = Field(default=None, max_length=200)
+    secret: bool = False   # 一覧に出さずメタ情報も書かない。画面が終了時に消す
 
 
 def _music_running() -> int:
@@ -550,11 +553,17 @@ async def music_generate(req: MusicReq, request: Request) -> dict:
             "lyrics": "" if req.instrumental else (req.lyrics or ""),
             "instrumental": req.instrumental, "created_at": time.time(),
             **{k: result.get(k) for k in ("duration", "elapsed_sec", "model", "seed")}}
-    try:
-        Path(result["path"]).with_suffix(".json").write_text(
-            json.dumps(meta, ensure_ascii=False), encoding="utf-8")
-    except OSError:
-        pass   # メタ情報は一覧表示用。保存に失敗しても音声は返す
+    path = Path(result["path"])
+    if req.secret:
+        result["file"] = SECRET_PREFIX + path.name
+        path = path.replace(path.with_name(result["file"]))
+        if await request.is_disconnected():   # 生成中に画面を閉じていたら、消す人がいないので残さない
+            path.unlink(missing_ok=True)
+    else:
+        try:
+            path.with_suffix(".json").write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+        except OSError:
+            pass   # メタ情報は一覧表示用。保存に失敗しても音声は返す
     return {**meta, "file": result["file"], "url": "/music/file/" + result["file"],
             "unloaded": unloaded, "gpu_switch": switched}
 
@@ -562,7 +571,8 @@ async def music_generate(req: MusicReq, request: Request) -> dict:
 def list_music(root: Path, limit: int = 100) -> list[dict]:
     if not root.is_dir():
         return []
-    files = sorted(root.glob("*.mp3"), key=lambda p: p.stat().st_mtime, reverse=True)
+    files = sorted((p for p in root.glob("*.mp3") if not p.name.startswith(SECRET_PREFIX)),
+                   key=lambda p: p.stat().st_mtime, reverse=True)
     items = []
     for p in files[:limit]:
         meta = {}

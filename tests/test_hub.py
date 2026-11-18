@@ -191,6 +191,26 @@ def test_secret_chat_workspace_is_discarded(client, monkeypatch, tmp_path):
     assert sorted(p.name for p in tmp_path.iterdir()) == ["_attach", "chat_normal"]
 
 
+def test_secret_music_is_unlisted_and_swept(client, monkeypatch, tmp_path):
+    """シークレットの曲は一覧に出さず、メタ情報も書かず、起動時の掃除で消す。"""
+    monkeypatch.setattr(music, "MUSIC_OUT", tmp_path)
+
+    async def gen(cfg, key, prompt, **kw):
+        (tmp_path / "x.mp3").write_bytes(b"ID3")
+        return {"path": str(tmp_path / "x.mp3"), "file": "x.mp3", "duration": 1, "model": key}
+
+    async def no_unload(cfg, cat, running):
+        return []
+    monkeypatch.setattr(music, "generate_music", gen)
+    monkeypatch.setattr(hub, "free_vram_for_generation", no_unload)
+    r = client.post("/music/generate", json={"prompt": "p", "secret": True}).json()
+    assert r["file"] == "secret-x.mp3" and [p.name for p in tmp_path.iterdir()] == ["secret-x.mp3"]
+    assert client.get("/music/list").json()["items"] == []
+    assert client.get(r["url"]).status_code == 200
+    hub.sweep_secret()
+    assert not list(tmp_path.iterdir())
+
+
 def test_music_files_list_and_traversal(client, monkeypatch, tmp_path):
     monkeypatch.setattr(music, "MUSIC_OUT", tmp_path)
     (tmp_path / "a.mp3").write_bytes(b"ID3")

@@ -1,7 +1,8 @@
 // 音楽: 曲調タグと歌詞を組み立てて ACE-Step で生成し、トラック一覧で聴き比べる画面。
+// シークレット中の入力と曲はメモリにだけ置き、終えるときにサーバーの音声ファイルも消す。
 import { useEffect, useRef, useState } from "react";
-import { Disc3, Music, PenLine, RefreshCw, Trash2 } from "lucide-react";
-import { deleteMusic, draftLyrics, fetchCategories, generateMusic, musicList, musicModels } from "./api.js";
+import { Disc3, EyeOff, Music, PenLine, RefreshCw, Trash2 } from "lucide-react";
+import { deleteMusic, discardMusic, draftLyrics, fetchCategories, generateMusic, musicList, musicModels } from "./api.js";
 import { Button, ErrorNote, Field, inputCls, usePersisted } from "./ui.jsx";
 
 const TAGS = {
@@ -10,12 +11,19 @@ const TAGS = {
   声と楽器: ["female vocal", "male vocal", "piano", "guitar", "synth", "strings"],
 };
 
+const BLANK = { theme: "", style: "", lyrics: "", instrumental: false, duration: 30, model: "", title: "" };
 const fmtTime = (s) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, "0")}`;
 
 export default function MusicView() {
   const [models, setModels] = useState([]);
-  const [tracks, setTracks] = useState([]);
-  const [form, setForm] = usePersisted("hub.music.form", { theme: "", style: "", lyrics: "", instrumental: false, duration: 30, model: "", title: "" });
+  const [saved, setSaved] = useState([]);
+  const [kept, setKept] = usePersisted("hub.music.form", BLANK);
+  // シークレット中の入力と曲。localStorage にも一覧 (/music/list) にも入れない。null は通常モード
+  const [secret, setSecret] = useState(null);
+  const form = secret?.form ?? kept;
+  const setForm = (fn) => (secret ? setSecret((s) => s && { ...s, form: fn(s.form) }) : setKept(fn));
+  const tracks = secret?.tracks ?? saved;
+  const setTracks = (fn) => (secret ? setSecret((s) => s && { ...s, tracks: fn(s.tracks) }) : setSaved(fn));
   const [busy, setBusy] = useState("");
   const [elapsed, setElapsed] = useState(0);
   const [error, setError] = useState("");
@@ -25,7 +33,7 @@ export default function MusicView() {
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
   const [loaded, setLoaded] = useState(false);   // 初回の一覧取得前に「まだありません」と出さない
-  const reload = () => musicList().then((d) => setTracks(d.items)).catch((e) => setError(e.message)).finally(() => setLoaded(true));
+  const reload = () => musicList().then((d) => setSaved(d.items)).catch((e) => setError(e.message)).finally(() => setLoaded(true));
   // 画面は隠れても残るので、エンジンの起動・停止のたびに ACE-Step の状態を取り直す
   useEffect(() => {
     const refresh = () => musicModels().then((d) => setModels(d.models)).catch(() => {});
@@ -34,11 +42,25 @@ export default function MusicView() {
   }, []);
   useEffect(() => {
     musicModels().then((d) => setModels(d.models)).catch((e) => setError(e.message));
-    fetchCategories().then((c) => setForm((f) => ({ ...f, model: f.model || c.categories?.music?.model || "music", duration: f.duration || c.categories?.music?.duration || 30 }))).catch(() => {});
+    fetchCategories().then((c) => setKept((f) => ({ ...f, model: f.model || c.categories?.music?.model || "music", duration: f.duration || c.categories?.music?.duration || 30 }))).catch(() => {});
     reload();
     return () => clearInterval(timer.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // 画面を離れる・閉じる・再読み込みでもシークレットの曲を残さない
+  const secretFiles = useRef(null);
+  secretFiles.current = secret && secret.tracks.map((t) => t.file);
+  useEffect(() => {
+    const drop = () => secretFiles.current?.forEach(discardMusic);
+    window.addEventListener("pagehide", drop);
+    return () => { window.removeEventListener("pagehide", drop); drop(); };
+  }, []);
+  const toggleSecret = () => {
+    secretFiles.current?.forEach(discardMusic);
+    setSecret(secret ? null : { form: { ...BLANK, model: kept.model, duration: kept.duration }, tracks: [] });
+    setError("");
+  };
 
   const current = models.find((m) => m.key === form.model);
   const tagSet = new Set(form.style.split(",").map((t) => t.trim()).filter(Boolean));
@@ -71,10 +93,12 @@ export default function MusicView() {
       const r = await generateMusic({
         model: form.model, prompt: form.style || form.theme, lyrics: form.instrumental ? null : form.lyrics,
         instrumental: form.instrumental, duration: Number(form.duration), title: form.title || form.theme.slice(0, 40),
+        secret: !!secret,
       });
       setFresh(r.file);
       setNotice(r.gpu_switch?.length ? r.gpu_switch.join("・") : "");
-      reload();
+      if (secret) setSecret((s) => s && { ...s, tracks: [r, ...s.tracks] });
+      else reload();
     } catch (e) {
       setError(e.message);
     } finally {
@@ -104,7 +128,20 @@ export default function MusicView() {
   return (
     <div className="flex h-full flex-col overflow-y-auto lg:flex-row lg:overflow-hidden">
       <section className="space-y-4 p-4 lg:w-[440px] lg:shrink-0 lg:overflow-y-auto lg:border-r lg:border-slate-800">
-        <h1 className="flex items-center gap-2 text-base font-semibold text-amber-200"><Music size={18} aria-hidden="true" /> 曲を作る</h1>
+        <div className="flex items-center gap-2">
+          <h1 className="mr-auto flex items-center gap-2 text-base font-semibold text-amber-200"><Music size={18} aria-hidden="true" /> 曲を作る</h1>
+          <button
+            type="button"
+            onClick={toggleSecret}
+            disabled={!!busy}
+            aria-pressed={!!secret}
+            className={`flex min-h-10 items-center gap-1 rounded-lg border px-2.5 text-xs disabled:opacity-50 ${secret ? "border-violet-500/40 bg-violet-500/10 text-violet-200" : "border-slate-700 text-slate-400"}`}
+            title="入力と曲を保存しません。解除・再読み込み・画面を閉じたときに曲ごと消えます"
+          >
+            <EyeOff size={14} aria-hidden="true" /> シークレット
+          </button>
+        </div>
+        {secret && <p className="text-xs leading-relaxed text-violet-300">シークレット中です。入力と曲は保存されず、解除・再読み込み・画面を閉じたときに消えます。</p>}
         {current && !current.connected && (
           <p className="rounded-lg border border-slate-700 bg-slate-900/60 px-3 py-2 text-xs text-slate-300">ACE-Step は停止中です。生成するときに画像側のモデルを解放して自動で起動します（初回は1分ほど余分にかかります）。</p>
         )}
@@ -169,7 +206,7 @@ export default function MusicView() {
       <section className="min-h-0 flex-1 p-4 lg:overflow-y-auto">
         <div className="mb-3 flex items-center">
           <h2 className="mr-auto text-sm font-semibold text-slate-200">トラック <span className="font-normal text-slate-500">{tracks.length}曲</span></h2>
-          <button type="button" onClick={reload} className="flex min-h-9 items-center gap-1 px-2 text-xs text-slate-400 hover:text-slate-200"><RefreshCw size={14} aria-hidden="true" /> 更新</button>
+          {!secret && <button type="button" onClick={reload} className="flex min-h-9 items-center gap-1 px-2 text-xs text-slate-400 hover:text-slate-200"><RefreshCw size={14} aria-hidden="true" /> 更新</button>}
         </div>
         <ul className="space-y-2">
           {tracks.map((t) => (
@@ -195,8 +232,8 @@ export default function MusicView() {
             </li>
           ))}
         </ul>
-        {!loaded && <p role="status" className="py-16 text-center text-sm text-slate-500">読み込んでいます…</p>}
-        {loaded && !tracks.length && <p className="py-16 text-center text-sm text-slate-500">まだ曲がありません</p>}
+        {!loaded && !secret && <p role="status" className="py-16 text-center text-sm text-slate-500">読み込んでいます…</p>}
+        {(loaded || secret) && !tracks.length && <p className="py-16 text-center text-sm text-slate-500">まだ曲がありません</p>}
       </section>
     </div>
   );

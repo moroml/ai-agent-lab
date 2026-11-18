@@ -60,4 +60,7 @@ export const musicModels = () => get("/music/models");
 export const musicList = () => get("/music/list");
 export const generateMusic = (body) => post("/music/generate", body);
 export const draftLyrics = (body) => post("/hub/lyrics", body);
+// シークレットの曲を消す。画面を閉じる途中でも届くよう keepalive で送る
+export const discardMusic = (file) =>
+  fetch(`/music/file/${encodeURIComponent(file)}`, { method: "DELETE", keepalive: true }).catch(() => {});
 export const deleteMusic = (file) => fetch(`/music/file/${encodeURIComponent(file)}`, { method: "DELETE" }).then(jsonOrThrow);
