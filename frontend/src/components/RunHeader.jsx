@@ -71,7 +71,7 @@ export default function RunHeader({
         }}
         aria-haspopup="dialog"
         aria-expanded={infoOpen}
-        className="order-first w-full min-w-0 text-left text-xl font-bold text-slate-100 hover:text-blue-300"
+        className="order-first line-clamp-2 w-full min-w-0 break-words text-left text-xl font-bold text-slate-100 hover:text-blue-300"
         title="クリックで全文と実行条件を表示"
       >
         {run.task}
