@@ -76,7 +76,7 @@ async def wrap(run, task: str, coro) -> None:
     nodes = snap.get("nodes", [])
     if any(n.get("kind") == "research" for n in nodes):
         return   # Web で調べた回答は調べた時点に依存するため保存しない
-    for n in nodes:
+    for n in reversed(nodes):   # 答え直しがあれば後のものが最終回答
         if n.get("kind") == "answer" and n.get("output"):
             put(task, run.model, run.mode, n["output"], run.id)
             break

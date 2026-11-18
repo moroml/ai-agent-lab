@@ -983,6 +983,50 @@ _RESCUE_MEMO_TEMPLATE_AGG = (
     "思考メモの文章をそのまま転記する必要はありません。\n\n")
 
 
+# 回答の冒頭が拒否かどうか。実測 (2026-11-18): gpt-oss は "I'm sorry, but I can't help with that."、
+# 日本語指示つきでは「申し訳ありませんが、そのご要望には対応できません。」、
+# gemma は警告のあと「…公開することは…控えております」と書く。
+_REFUSAL_RE = re.compile(
+    r"I can(?:[’']t|not) (?:help|assist|provide|comply)"
+    r"|(?:申し訳(?:ありません|ございません)が|すみませんが|残念ながら)[^。]{0,40}(?:できません|かねます)"
+    r"|(?:お答え|お手伝い|お教え|ご案内|提供|回答|説明|公開)(?:する)?(?:こと)?[はがも]?"
+    r"でき(?:ません|かねます)"
+    r"|控え(?:て(?:おり|い)ます|させていただ)"
+    r"|応じ(?:られません|かねます|ることはできません)")
+
+
+async def _unrefuse(bus, answer_id: str, cfg, model: str, messages: list[dict],
+                    final: str, gen_override: dict | None = None) -> str:
+    """回答が拒否だったら、無検閲モデル (models.yaml の refusal_fallback) で答え直す。
+
+    答え直しは別の answer ノードに出す (元の回答は残る)。拒否でない回答の経路は不変。
+    """
+    key = cfg.get("refusal_fallback")
+    if (not key or key == model or key not in cfg.get("models", {})
+            or not _REFUSAL_RE.search((final or "")[:400])):
+        return final
+    try:
+        usable = (await llm.model_usable(cfg, key, set(await llm.list_models())))[0]
+    except Exception:
+        usable = False
+    if not usable:
+        bus.emit_log(answer_id, f"[拒否の救済] {key} が使えないため答え直しません")
+        return final
+    node_id = bus.create_node("answer", "再回答 (無検閲モデル)", "", bus.nodes[answer_id].parent_id)
+    bus.emit_log(node_id, f"[拒否の救済] 回答が拒否だったため {key} で答え直します")
+    try:
+        text = await _stream_llm(bus, node_id, messages, cfg, key, think=False,
+                                 num_predict=_AGGREGATE_NUM_PREDICT, gen_override=gen_override)
+    except Exception as e:   # 元の回答があるので、答え直しの失敗では Run を止めない
+        text = ""
+        bus.emit_log(node_id, f"[拒否の救済] 生成に失敗しました: {e}")
+    if not text.strip():
+        bus.complete(node_id, final)   # 答え直せなかったら元の回答を最終回答のままにする
+        return final
+    bus.complete(node_id, text)
+    return text
+
+
 FOLLOW_UP_TITLE = "🛠 追加指示"   # 追加指示ノードの題の接頭辞 (画面の会話表示もこれで見分ける)
 
 
@@ -1031,6 +1075,7 @@ class DirectOrchestrator:
         # 空の最終回答を done にしない (実績: 思考暴走・出力上限で
         # 本文 0 字のまま done になった Run が 3 件)
         bus.complete(answer_id, _require_final_answer(final))
+        await _unrefuse(bus, answer_id, self.cfg, self.model, messages, final, self.gen_override)
 
     async def follow_up(self, task: str, message: str) -> None:
         """文章で答えた Run への続きの質問。これまでのやりとりを渡し、同じモデルが会話として答える
@@ -1318,6 +1363,12 @@ class CascadeOrchestrator:
         bus.set_status(root_id, "running")
         try:
             prompt = await _web_research(bus, root_id, self.cfg, self.fast_model, task)
+            ask = [{"role": "system", "content": DIRECT_SYSTEM}, {"role": "user", "content": prompt}]
+
+            async def adopt(text):
+                """text を最終回答として確定する (拒否なら無検閲モデルで答え直す)。"""
+                bus.complete(answer_id, text)
+                await _unrefuse(bus, answer_id, self.cfg, self.model, ask, text, self.gen_override)
             # 1) 高速モデルの下書き
             draft_id = bus.create_node("draft", "下書き (高速モデル)",
                                        "高速モデルが全文を先に書く", root_id)
@@ -1337,7 +1388,7 @@ class CascadeOrchestrator:
             if not reasons:
                 bus.emit_log(draft_id, "[カスケード] 下書きが品質ゲートを通過しました")
                 answer_id = bus.create_node("answer", "最終回答", "", root_id)
-                bus.complete(answer_id, draft)
+                await adopt(draft)
                 bus.complete(root_id, "全工程が完了しました")
                 bus.run_finished()
                 return
@@ -1366,7 +1417,7 @@ class CascadeOrchestrator:
             if not reasons_r:
                 bus.emit_log(repair_id, "[カスケード] 自己修正が品質ゲートを通過しました")
                 answer_id = bus.create_node("answer", "最終回答", "", root_id)
-                bus.complete(answer_id, repaired)
+                await adopt(repaired)
                 bus.complete(root_id, "全工程が完了しました")
                 bus.run_finished()
                 return
@@ -1429,7 +1480,7 @@ class CascadeOrchestrator:
 
             answer_id = bus.create_node("answer", "最終回答", "", root_id)
             if expanded_ok:
-                bus.complete(answer_id, expanded)
+                await adopt(expanded)
             else:
                 # 4) フォールバック: 高性能モデルの全文生成 (言語ガード付き)。
                 # この段がカスケードの最終回答段であり、think はモデル既定の
@@ -1465,7 +1516,7 @@ class CascadeOrchestrator:
                                  "[思考救済] 第2段 (think なし) の生成が完了しました")
                 # 空の最終回答を done にしない (実績 3991f92d28: 全段の
                 # 打ち切りで answer 0 字のまま完了扱いになっていた)
-                bus.complete(answer_id, _require_final_answer(final))
+                await adopt(_require_final_answer(final))
             bus.complete(root_id, "全工程が完了しました")
             bus.run_finished()
         except asyncio.CancelledError:

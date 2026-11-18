@@ -431,7 +431,8 @@ models:
     tag: "huihui_ai/qwen3.8-abliterated:27b-q4_K_M"   # pro の拒否除去(abliterated)版。第三者(huihui_ai)配布
     label: "Qwen3.8 27B 無検閲版"
     family: qwen35
-    tier: external       # 2026-11-17登録。自動ルーティングには載せず、明示指定(model=uncensored / UI選択)でのみ使う。
+    tier: external       # 2026-11-17登録。自動ルーティングには載せない。明示指定(model=uncensored / UI選択)と、
+                         # 拒否の救済 (refusal_fallback。2026-11-18) でだけ使う。
                          # archive にすると hub のチャット選択肢からも消えるため external にしている
     placement: hybrid        # 16.5GB(pro と同じ Q4_K_M + vision projector)
     ram_gb: 6
@@ -576,6 +577,13 @@ cascade_fast_model: distill4b
 # coder(qwen3:30b, hybrid) 44.2 tok/s・ロード27.1s。簡単なタスクは worker が
 # 3反復で完了し、hybrid のロードもスピルも一切払わずに済む(実測)。
 cascade: true
+
+# 文章で答える前の Web 調査 (orchestrator._web_research)。false で調べずに答える。
+web_research: true
+
+# 拒否の救済 (orchestrator._unrefuse): 文章回答が拒否だったとき、このモデルで答え直す。
+# 空にすると答え直さない。拒否でない回答には介入しない。
+refusal_fallback: uncensored
 
 # 思考暴走の救済 (orchestrator が参照。対象は direct の最終回答段のみ):
 # 実効 think が有効な生成で、思考の累積が tokens (概算トークン。実測換算
