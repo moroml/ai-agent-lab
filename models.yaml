@@ -413,6 +413,50 @@ models:
     use: "Qwen3.8-27B abliterated(qwen35 dense) / Q4_K_M 16.5GB・hybrid / think=False 実測(2026-11-17):
       短文21.2・350トークン14.1 tok/s、初回ロード36秒。pro が拒否した質問(錠前ピッキング)に回答 /
       回答の正確さは未評価(訳語の乱れあり) / tools・think有りは未実測"
+  uncensored_fast:
+    tag: "huihui_ai/gpt-oss-abliterated:20b"   # worker の拒否除去(abliterated)版。第三者(huihui_ai)配布
+    label: "gpt-oss 20B 無検閲版"
+    family: gpt-oss
+    tier: external           # 2026-11-18登録。明示指定(UI選択)でのみ使う
+    placement: vram          # 実測 100%GPU・12.7GB(2026-11-18)
+    tools: true              # 調査用の指示で web_search を 2/2 呼び、雑談では呼ばない(実測)
+    mtp: false
+    num_ctx: 16384
+    options: {temperature: 1.0, top_p: 1.0, top_k: 0, min_p: 0}   # worker と同じ(OpenAI公式推奨)
+    strengths: [chat, tool, speed, reasoning]
+    for: "gpt-oss 20B 無検閲版。速い。明示指定のみ"
+    use: "gpt-oss-20B abliterated / 13.8GB・VRAM全載り / 実測(2026-11-18): ロード込み1500トークン22秒、
+      worker が拒否した質問(錠前ピッキング)に回答 / 回答の正確さは未評価(think=low で語の乱れあり)"
+  uncensored_gemma12:
+    tag: "huihui_ai/gemma-4-abliterated:12b"   # gemma12 の拒否除去(abliterated)版。第三者(huihui_ai)配布
+    label: "Gemma4 12B 無検閲版"
+    family: gemma4
+    tier: external           # 2026-11-18登録。明示指定(UI選択)でのみ使う
+    placement: vram          # 実測 100%GPU・8.1GB・58.1tok/s(2026-11-18)
+    tools: true              # 不安定: web_search を呼んだのは 3回中1回、残りは記憶で答えた(実測)
+    mtp: false
+    num_ctx: 16384
+    think: "low"
+    options: {temperature: 1.0, top_p: 0.95, top_k: 64, min_p: 0}
+    strengths: [chat, speed]
+    for: "Gemma4 12B 無検閲版。軽くて速い。明示指定のみ"
+    use: "Gemma4-12B abliterated(dense 11.9B Q4_K_M) / 7.6GB・VRAM全載り / 実測(2026-11-18): 58.1tok/s・ロード10秒、
+      錠前ピッキングの質問に回答 / ツール呼び出しは不安定 / 回答の正確さは未評価"
+  uncensored_gemma:
+    tag: "huihui_ai/gemma-4-abliterated:26b-qat"   # gemma の拒否除去(abliterated)版。第三者(huihui_ai)配布
+    label: "Gemma4 26B 無検閲版"
+    family: gemma4
+    tier: external           # 2026-11-18登録。明示指定(UI選択)でのみ使う
+    placement: vram          # 実測 98%GPU・15.0GB・36.2tok/s(2026-11-18)
+    tools: false             # ollama show は tools 対応だが、web_search を 3回中0回しか呼ばなかった(実測)=チャット専用
+    mtp: false
+    num_ctx: 16384
+    think: "low"
+    options: {temperature: 1.0, top_p: 0.95, top_k: 64, min_p: 0}
+    strengths: [chat, reasoning]
+    for: "Gemma4 26B 無検閲版。チャット専用。明示指定のみ"
+    use: "Gemma4-26B abliterated(MoE 25.2B Q4_K_M) / 18GB・ほぼVRAM全載り / 実測(2026-11-18): 36.2tok/s・ロード22秒、
+      錠前ピッキングの質問に回答 / ツールは呼ばない / 回答の正確さは未評価"
   minimax:
     tag: "minimax-h3:20b"           # = hf.co/unsloth/MiniMax-H3-GGUF:q4_K_M(別名)
     family: unknown          # ollama show で arch/ctx 取得不可(このOllama版が未対応の可能性)
@@ -518,6 +562,9 @@ web_research: true
 
 # 拒否の救済 (orchestrator._unrefuse): 文章回答が拒否だったとき、このモデルで答え直す。
 # 空にすると答え直さない。拒否でない回答には介入しない。
+# 拒否から答え直しの完了までの実測 (2026-11-18、worker が拒否した1問・各1回):
+# uncensored 138秒 / uncensored_fast 77秒 / uncensored_gemma12 43秒。
+# 速さを取るなら uncensored_gemma12 に替える (回答の正確さはどれも未評価)。
 refusal_fallback: uncensored
 
 # 思考暴走の救済 (orchestrator が参照。対象は direct の最終回答段のみ):
