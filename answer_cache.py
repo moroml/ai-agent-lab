@@ -73,7 +73,10 @@ async def wrap(run, task: str, coro) -> None:
         return
     await coro
     snap = bus.full_snapshot()
-    for n in snap.get("nodes", []):
+    nodes = snap.get("nodes", [])
+    if any(n.get("kind") == "research" for n in nodes):
+        return   # Web で調べた回答は調べた時点に依存するため保存しない
+    for n in nodes:
         if n.get("kind") == "answer" and n.get("output"):
             put(task, run.model, run.mode, n["output"], run.id)
             break
