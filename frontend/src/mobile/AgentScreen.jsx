@@ -164,7 +164,7 @@ export default function AgentScreen({ eng }) {
   const ollama = eng.byId.ollama;
   const diff = countDiff(opts);
   const live = runsView?.filter((r) => r.status === "running" || r.status === "queued") ?? [];
-  const history = runsView?.filter((r) => r.status !== "running" && r.status !== "queued") ?? [];
+  const past = runsView?.filter((r) => r.status !== "running" && r.status !== "queued") ?? [];
   const startOllama = async () => { setStarting(true); await eng.run(() => startEngines(["ollama"]), "起動しています…"); setStarting(false); };
 
   return (
@@ -211,7 +211,7 @@ export default function AgentScreen({ eng }) {
             ) : (
               <div className="space-y-4">
                 <RunGroup title="実行中・待機中" runs={live} plans={plans} onOpen={setOpenId} />
-                <RunGroup title="履歴" runs={history} plans={plans} onOpen={setOpenId} />
+                <RunGroup title="履歴" runs={past} plans={plans} onOpen={setOpenId} />
               </div>
             )}
         </section>
