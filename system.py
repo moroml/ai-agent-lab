@@ -29,7 +29,7 @@ import gpu_switch
 import hub
 import llm
 
-router = APIRouter(dependencies=[Depends(engines.require_local)])
+router = APIRouter(dependencies=[Depends(engines.require_local_or_login)])
 ENV_PATH = Path(__file__).with_name(".env")
 OLLAMA_EXE = Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Ollama" / "ollama.exe"
 # 画面から起動する Ollama に補う最適化 env (ユーザー設定があればそちらを優先)
@@ -605,7 +605,7 @@ async def _pull(tag: str) -> None:
         st["status"], st["error"] = "error", str(e)[:300]
 
 
-@router.post("/system/ollama/pull")
+@router.post("/system/ollama/pull", dependencies=[Depends(engines.require_local)])
 async def ollama_pull(req: PullReq) -> dict:
     """models.yaml にあるモデルだけを導入する (任意の名前は受けない)。"""
     tags = {(m or {}).get("tag") for m in (llm.load_config().get("models") or {}).values()}
@@ -633,7 +633,7 @@ def _write_env(name: str, value: str) -> None:
     ENV_PATH.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
 
 
-@router.post("/system/anthropic-key")
+@router.post("/system/anthropic-key", dependencies=[Depends(engines.require_local)])
 async def set_anthropic_key(req: KeyReq) -> dict:
     """空文字で削除。値はサーバー側の .env (git 管理外) にだけ置き、返さない。"""
     key = req.key.strip()

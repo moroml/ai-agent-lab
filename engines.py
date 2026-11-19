@@ -22,15 +22,28 @@ router = APIRouter()
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
-def require_local(request: Request) -> None:
-    """プロセスを起動・停止するので、キーがあってもこのPC以外からは受け付けない。"""
-    hub.require_local_or_key(request)
+def _is_local(request: Request) -> bool:
     try:
-        if ipaddress.ip_address(request.client.host if request.client else "").is_loopback:
-            return
+        return ipaddress.ip_address(request.client.host if request.client else "").is_loopback
     except ValueError:
-        pass
-    raise HTTPException(403, "エンジンの起動・停止はこのPCからだけ行えます")
+        return False
+
+
+def require_local(request: Request) -> None:
+    """鍵の設定やモデルの導入など、ログインしていてもこのPC以外からは受け付けない操作に使う。"""
+    hub.require_local_or_key(request)
+    if not _is_local(request):
+        raise HTTPException(403, "この操作はこのPCからだけ行えます")
+
+
+def require_local_or_login(request: Request) -> None:
+    """プロセスを起動・停止する操作。このPCか、画面にログイン済みの端末 (共通キー) からだけ受け付ける。
+
+    モデル専用キーでは通さない (2026-11-19 ユーザー指示: スマホから起動・停止できるようにする)。
+    """
+    hub.require_local_or_key(request)
+    if not _is_local(request) and hub.openai_api._check_auth(request) is not None:
+        raise HTTPException(403, "エンジンの起動・停止は、このPCかログイン済みの端末からだけ行えます")
 
 
 def engine_list(cfg: dict) -> list[dict]:
@@ -107,12 +120,12 @@ async def _unload_ollama() -> list[str]:
     return tags
 
 
-@router.get("/engines", dependencies=[Depends(require_local)])
+@router.get("/engines", dependencies=[Depends(require_local_or_login)])
 async def list_engines() -> dict:
     return {"engines": await statuses(llm.load_config())}
 
 
-@router.post("/engines/{name}/start", dependencies=[Depends(require_local)])
+@router.post("/engines/{name}/start", dependencies=[Depends(require_local_or_login)])
 async def start_engine(name: str) -> dict:
     from runs import manager
     cfg = llm.load_config()
@@ -138,7 +151,7 @@ async def start_engine(name: str) -> dict:
     return {"state": "starting", "done": done}
 
 
-@router.post("/engines/{name}/stop", dependencies=[Depends(require_local)])
+@router.post("/engines/{name}/stop", dependencies=[Depends(require_local_or_login)])
 async def stop_engine(name: str) -> dict:
     e = _find(llm.load_config(), name)
     proc = await asyncio.to_thread(_listener, _port(e["base_url"]))

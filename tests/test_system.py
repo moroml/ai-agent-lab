@@ -38,6 +38,26 @@ def test_remote_client_is_refused(monkeypatch):
     assert c.post("/system/vram/free", json={"targets": ["ollama"]}).status_code in (401, 403)
 
 
+def test_logged_in_remote_can_operate_but_not_configure(monkeypatch, tmp_path):
+    monkeypatch.setattr(llm, "load_config", lambda *a, **k: CFG)
+    monkeypatch.setattr(system, "ENV_PATH", tmp_path / ".env")
+    monkeypatch.setattr(system.hub.openai_api, "api_key", lambda: "k")
+    monkeypatch.setattr(system.hub.openai_api, "model_keys", lambda: {"a": "mk"})
+
+    async def autoload(*a, **k):
+        return None
+    monkeypatch.setattr(llm, "prewarm_default", autoload)
+    app = FastAPI()
+    system.register(app)
+    c = TestClient(app, base_url="http://127.0.0.1:8765", client=("100.64.0.9", 50000))
+    common, bound = {"Authorization": "Bearer k"}, {"Authorization": "Bearer mk"}
+    assert c.post("/system/autoload", json={"enabled": False}, headers=common).status_code == 200
+    assert c.post("/system/autoload", json={"enabled": False}, headers=bound).status_code == 403   # モデル専用キーは不可
+    # 鍵の設定とモデルの導入は、ログインしていてもこのPCだけ
+    assert c.post("/system/anthropic-key", json={"key": ""}, headers=common).status_code == 403
+    assert c.post("/system/ollama/pull", json={"tag": "ta:1b"}, headers=common).status_code == 403
+
+
 def test_unload_selected_ollama_model(client, monkeypatch):
     async def loaded():
         return [{"name": "ta:1b"}, {"name": "tb:2b"}]
