@@ -83,7 +83,7 @@ export default function ImageScreen({ eng, onToVideo }) {
     setError("");
     try {
       const en = await toEnglish();
-      setForm((f) => ({ ...f, en, enFrom: f.ja }));
+      setForm((f) => ({ ...f, en, enFrom: form.ja }));
     } catch (e) {
       setError(`英語プロンプトを作れませんでした: ${e.message}`);
     } finally {
@@ -98,7 +98,7 @@ export default function ImageScreen({ eng, onToVideo }) {
       let en = form.en.trim();
       if (form.promptMode !== "direct" && (!en || form.enFrom !== form.ja)) {
         en = await toEnglish();
-        setForm((f) => ({ ...f, en, enFrom: f.ja }));
+        setForm((f) => ({ ...f, en, enFrom: form.ja }));
       }
       if (!en) throw new Error("プロンプトを入力してください");
       setBusy("送信しています…");

@@ -62,7 +62,7 @@ export default function VideoScreen({ eng, source, onSourceChange }) {
       if (form.promptMode !== "direct" && form.ja.trim() && (!en || form.enFrom !== form.ja)) {
         setBusy("英語プロンプトを作っています…");
         en = (await enhancePrompt(form.ja, form.promptMode)).prompt_en;
-        setForm((f) => ({ ...f, en, enFrom: f.ja }));
+        setForm((f) => ({ ...f, en, enFrom: form.ja }));
       }
       if (!en) throw new Error("動きの説明を入力してください");
       setBusy("送信しています…");

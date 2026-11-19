@@ -27,6 +27,8 @@ export default function AgentScreen({ eng }) {
   const [starting, setStarting] = useState(false);
   // シークレット: このページで開始した実行の ID。解除・画面を閉じる・離れるでサーバーの作業フォルダごと消す
   const secretRuns = useRef(new Set());
+  const secretOn = useRef(false);
+  secretOn.current = secret;
   const discarded = useRef(new Set());
 
   const set = useCallback((patch) => setOpts((o) => ({ ...o, ...patch })), []);
@@ -52,7 +54,7 @@ export default function AgentScreen({ eng }) {
 
   // 仮の行は、サーバーの一覧に同じ id が載った時点で退く
   const runsView = useMemo(() => {
-    if (!runs) return runs;
+    if (!runs) return optimistic.length ? optimistic : runs;   // 一覧を取れなくても、今始めた依頼は開けるようにする
     const pending = optimistic.filter((o) => !runs.some((r) => r.id === o.id));
     return (pending.length ? [...pending, ...runs] : runs).filter((r) => r.mode !== "bench");   // ベンチは PC 版で見る
   }, [runs, optimistic]);
@@ -83,7 +85,12 @@ export default function AgentScreen({ eng }) {
 
   // ---- 開始・再実行 ----
   const handleStart = async (payload, asSecret = secret) => {
+    const wasOn = secretOn.current;
     const res = await startRun(asSecret ? { ...payload, secret: true, claude_review: false, api_review: false } : payload);
+    if (asSecret && wasOn && !secretOn.current) {   // 開始の応答を待つ間にシークレットを切った: 残さず捨てる
+      discardRun(res.run_id);
+      return;
+    }
     if (asSecret) secretRuns.current.add(res.run_id);
     setPlans((m) => ({ ...m, [res.run_id]: res }));
     setOptimistic((l) => [{
