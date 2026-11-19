@@ -1,0 +1,88 @@
+/* スマホ版 UI のトークン。部品は Tailwind の m-* (bg-m-bg など) だけを参照し、色を直書きしない。
+   方向性: 自宅の GPU 機を手元から動かす「リモコン」。面は中立色の明度差、アクセントは稼働ランプの緑1色を
+   主操作・選択・フォーカスにだけ使う。値は WCAG 2.2 AA を満たす組 (ui_audit.py --contrast で確認済み)。 */
+
+.m-root {
+  color-scheme: light;
+  --m-bg: #f4f6f4; --m-surface: #ffffff; --m-raised: #ffffff; --m-sunken: #e9edea;
+  --m-fg: #171c1a; --m-muted: #47504c; --m-subtle: #5f6965;
+  --m-line: #d3d9d6; --m-line-strong: #747d78;
+  --m-primary: #0b6b4f; --m-primary-hover: #095a43; --m-on-primary: #ffffff; --m-primary-soft: #dff1ea;
+  --m-danger: #b42318; --m-on-danger: #ffffff; --m-danger-soft: #fdecea;
+  --m-warning: #8a4b0b; --m-warning-soft: #fdf1df;
+  --m-scrim: rgb(15 18 17 / 0.45);
+  --m-shadow: 0 -1px 0 rgb(0 0 0 / 0.04), 0 -8px 24px rgb(0 0 0 / 0.12);
+}
+@media (prefers-color-scheme: dark) {
+  .m-root {
+    color-scheme: dark;
+    --m-bg: #0f1211; --m-surface: #171b1a; --m-raised: #1f2423; --m-sunken: #0a0c0b;
+    --m-fg: #e8ecea; --m-muted: #a9b2ae; --m-subtle: #8f9894;
+    --m-line: #2e3533; --m-line-strong: #6b7571;
+    --m-primary: #5fd0a5; --m-primary-hover: #7bdcb6; --m-on-primary: #06241a; --m-primary-soft: #12332a;
+    --m-danger: #f97066; --m-on-danger: #2a0b08; --m-danger-soft: #3a1512;
+    --m-warning: #f0b849; --m-warning-soft: #33270c;
+    --m-scrim: rgb(0 0 0 / 0.6);
+    --m-shadow: 0 -1px 0 rgb(255 255 255 / 0.06), 0 -8px 24px rgb(0 0 0 / 0.5);
+  }
+}
+
+@theme inline {
+  --color-m-bg: var(--m-bg);
+  --color-m-surface: var(--m-surface);
+  --color-m-raised: var(--m-raised);
+  --color-m-sunken: var(--m-sunken);
+  --color-m-fg: var(--m-fg);
+  --color-m-muted: var(--m-muted);
+  --color-m-subtle: var(--m-subtle);
+  --color-m-line: var(--m-line);
+  --color-m-line-strong: var(--m-line-strong);
+  --color-m-primary: var(--m-primary);
+  --color-m-primary-hover: var(--m-primary-hover);
+  --color-m-on-primary: var(--m-on-primary);
+  --color-m-primary-soft: var(--m-primary-soft);
+  --color-m-danger: var(--m-danger);
+  --color-m-on-danger: var(--m-on-danger);
+  --color-m-danger-soft: var(--m-danger-soft);
+  --color-m-warning: var(--m-warning);
+  --color-m-warning-soft: var(--m-warning-soft);
+  --color-m-scrim: var(--m-scrim);
+}
+
+/* スマホ版を表示している間だけ、ページの地の色とフォーカスの色をトークンに合わせる */
+html[data-ui="mobile"] body { background-color: var(--m-bg); }
+.m-root {
+  font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", "BIZ UDPGothic", "Yu Gothic UI", Meiryo, sans-serif;
+  line-height: 1.7;
+  line-break: strict;
+  overflow-wrap: anywhere;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+}
+.m-root :focus-visible { outline: 2px solid var(--m-primary); outline-offset: 2px; }
+.m-root ::selection { background: var(--m-primary-soft); }
+.m-root * { scrollbar-color: var(--m-line-strong) transparent; }
+.m-num { font-variant-numeric: tabular-nums; font-family: ui-monospace, "Cascadia Mono", Consolas, "SFMono-Regular", Menlo, monospace; }
+
+/* 共用の Markdown (components/md.jsx) はPC版の暗色に直書きなので、スマホ版ではトークンに差し替える */
+.m-md { font-size: 1rem; line-height: 1.7; color: var(--m-fg); }
+.m-md > div { font-size: inherit; line-height: inherit; }
+.m-md b, .m-md h3 { color: var(--m-fg); }
+.m-md h3 { font-size: 1rem; margin-top: 12px; }
+.m-md code { background: var(--m-sunken); color: var(--m-fg); }
+.m-md pre { background: var(--m-sunken); border-color: var(--m-line); color: var(--m-fg); font-size: 0.875rem; }
+
+/* 下から出るシート。動きは「減らす」設定が無いときだけ */
+dialog.m-sheet { max-width: none; max-height: none; }
+dialog.m-sheet::backdrop { background: var(--m-scrim); }
+@media (prefers-reduced-motion: no-preference) {
+  dialog.m-sheet[open] { animation: m-sheet-in 250ms cubic-bezier(0, 0, 0, 1); }
+  dialog.m-sheet[open]::backdrop { animation: m-fade-in 200ms cubic-bezier(0, 0, 0, 1); }
+  .m-spin { animation: m-spin 0.9s linear infinite; }
+  .m-pulse { animation: m-pulse 1.4s ease-in-out infinite; }
+}
+@keyframes m-sheet-in { from { transform: translateY(24px); opacity: 0; } }
+@keyframes m-fade-in { from { opacity: 0; } }
+@keyframes m-spin { to { transform: rotate(360deg); } }
+@keyframes m-pulse { 50% { opacity: 0.45; } }

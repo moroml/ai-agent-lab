@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./mobile/mobile.css";
 
 /* Stalled(応答停止警告)カードの枠線点滅。
    box-shadow/border-color のアニメーションは毎フレーム paint が発生するため、
