@@ -97,9 +97,10 @@ export default function EnginesScreen({ eng }) {
       <section aria-labelledby="m-eng-all" className="space-y-2">
         <h3 id="m-eng-all" className="text-base font-semibold">まとめて操作</h3>
         <p className="text-sm text-m-muted">アプリを開いても、エンジンは自動では起動しません。使うものだけ起動してください。</p>
-        <Button variant="primary" icon={Play} className="w-full" busy={busy === "all-start"} disabled={!!busy || allUp}
-                onClick={() => act("all-start", () => startEngines(), "すべて起動しています…")}>すべて起動</Button>
-        {allUp && <p className="text-sm text-m-subtle">すべて稼働中です。</p>}
+        {allUp ? <p className="text-sm text-m-muted">すべて稼働中です。</p> : (
+          <Button variant="primary" icon={Play} className="w-full" busy={busy === "all-start"} disabled={!!busy}
+                  onClick={() => act("all-start", () => startEngines(), "すべて起動しています…")}>すべて起動</Button>
+        )}
         <Button variant={armed === "all-stop" ? "danger" : "secondary"} icon={Square} className="w-full" busy={busy === "all-stop"} disabled={!!busy || !anyUp}
                 onClick={() => arm("all-stop", () => act("all-stop", () => stopEngines(), "すべて停止しています…"))}>
           {armed === "all-stop" ? "停止する" : "すべて停止"}

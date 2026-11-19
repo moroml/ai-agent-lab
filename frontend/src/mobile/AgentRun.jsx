@@ -373,8 +373,8 @@ export default function AgentRun({ run, plan, onBack, onDeleted, onRefresh, onRe
               <Button icon={Square} busy={aborting} className="flex-1" onClick={abort}>{aborting ? "中断しています…" : "中断する"}</Button>
             ) : (
               <>
-                <Button icon={RotateCcw} busy={rerunning} className="flex-1" onClick={rerun}>同じ設定で再実行</Button>
-                <Button variant={armed ? "danger" : "secondary"} icon={Trash2} busy={deleting} className="flex-1" onClick={remove}>{armed ? "削除する" : "削除"}</Button>
+                <Button icon={RotateCcw} busy={rerunning} className="flex-1" onClick={rerun}>もう一度実行</Button>
+                <Button variant={armed ? "danger" : "ghost"} icon={Trash2} busy={deleting} className={armed ? "" : "text-m-danger"} onClick={remove}>{armed ? "削除する" : "削除"}</Button>
               </>
             )}
           </div>
