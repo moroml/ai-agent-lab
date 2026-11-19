@@ -5,12 +5,7 @@ import Markdown from "../components/md.jsx";
 import { modelName } from "../derive.js";
 import { ErrorNote, inputCls } from "./ui.jsx";
 import { AttachBar, DropZone, useAttach } from "../components/Attach.jsx";
-import { useChat } from "./useChat.js";
-
-export const TOOL_LABELS = {
-  web_search: "Web検索", fetch_url: "ページ取得", write_file: "ファイル作成", edit_file: "ファイル編集",
-  read_file: "ファイル読込", list_dir: "一覧", search_files: "ファイル内検索",
-};
+import { TOOL_LABELS, useChat } from "./useChat.js";
 
 export default function ChatView() {
   const att = useAttach();

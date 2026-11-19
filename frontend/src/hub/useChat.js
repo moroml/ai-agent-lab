@@ -7,6 +7,11 @@ import { withAttach } from "../components/Attach.jsx";
 import { discardChat, fetchCategories, prewarmChat, streamChat } from "./api.js";
 import { usePersisted } from "./ui.jsx";
 
+export const TOOL_LABELS = {
+  web_search: "Web検索", fetch_url: "ページ取得", write_file: "ファイル作成", edit_file: "ファイル編集",
+  read_file: "ファイル読込", list_dir: "一覧", search_files: "ファイル内検索",
+};
+
 // 次の発言で続きの作業ができるよう、作ったファイル名を履歴の本文に添える(中身は送らない)。
 // 添付は説明(置き場所と小さいテキストの中身)を本文に足す
 const forModel = ({ role, content, files, attach }) => {
