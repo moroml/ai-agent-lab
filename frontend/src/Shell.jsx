@@ -1,19 +1,11 @@
 // 種類別ワークスペースの外枠。左(狭い幅では下)のレールでチャット/エージェント/画像/動画/音楽を切り替える。
 // エージェント(App)は切り替えても状態(下書き・SSE)を保つため常に描画し、非表示にするだけにする。
-import { lazy, Suspense, useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import { Bot, Clapperboard, Image as ImageIcon, MessageSquare, Music } from "lucide-react";
 import App from "./App.jsx";
+import { lazyView } from "./lazyView.js";
 import { EngineBanner, EngineNavButton, EngineToast, useEngines } from "./components/EngineButton.jsx";
 
-// 再ビルド後に開きっぱなしのタブは古い分割ファイル名を読みに行き 404 で白画面になる。1回だけ再読込して新しい版を取る
-const lazyView = (load) => lazy(() => load().catch((e) => {
-  if (!sessionStorage.getItem("hub.reloaded")) {
-    sessionStorage.setItem("hub.reloaded", "1");
-    window.location.reload();
-    return new Promise(() => {});
-  }
-  throw e;
-}).then((m) => { sessionStorage.removeItem("hub.reloaded"); return m; }));
 const ChatView = lazyView(() => import("./hub/ChatView.jsx"));
 const ImageView = lazyView(() => import("./hub/ImageView.jsx"));
 const VideoView = lazyView(() => import("./hub/VideoView.jsx"));

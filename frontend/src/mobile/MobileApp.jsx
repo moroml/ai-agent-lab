@@ -1,16 +1,17 @@
 // スマホ版の外枠。上に「PCの稼働状況」の1行、下に種類のタブ。画面の中身は種類ごとの *Screen.jsx。
 // 一度開いた画面は隠すだけで残す (切り替えても生成中の追跡や会話の受信が途切れないように)。
-import { lazy, Suspense, useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import { Bot, ChevronRight, Clapperboard, Image as ImageIcon, MessageSquare, Music } from "lucide-react";
 import { NEEDS, useEngines } from "../components/EngineButton.jsx";
+import { lazyView } from "../lazyView.js";
 import { cx, Loading, Notice, Sheet } from "./ui.jsx";
 
-const ChatScreen = lazy(() => import("./ChatScreen.jsx"));
-const AgentScreen = lazy(() => import("./AgentScreen.jsx"));
-const ImageScreen = lazy(() => import("./ImageScreen.jsx"));
-const VideoScreen = lazy(() => import("./VideoScreen.jsx"));
-const MusicScreen = lazy(() => import("./MusicScreen.jsx"));
-const EnginesScreen = lazy(() => import("./EnginesScreen.jsx"));
+const ChatScreen = lazyView(() => import("./ChatScreen.jsx"));
+const AgentScreen = lazyView(() => import("./AgentScreen.jsx"));
+const ImageScreen = lazyView(() => import("./ImageScreen.jsx"));
+const VideoScreen = lazyView(() => import("./VideoScreen.jsx"));
+const MusicScreen = lazyView(() => import("./MusicScreen.jsx"));
+const EnginesScreen = lazyView(() => import("./EnginesScreen.jsx"));
 
 const TABS = [
   { id: "chat", label: "チャット", icon: MessageSquare },

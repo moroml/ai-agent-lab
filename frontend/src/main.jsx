@@ -1,6 +1,7 @@
-import React, { lazy, Suspense } from "react";
+import React, { Suspense } from "react";
 import ReactDOM from "react-dom/client";
 import "./index.css";
+import { lazyView } from "./lazyView.js";
 
 // 幅の狭い端末 (横向きのスマホを含む) にはスマホ版を出す。?ui=desktop / ?ui=mobile で一時的に切り替えられる
 const forced = new URLSearchParams(window.location.search).get("ui");
@@ -11,7 +12,7 @@ if (mobile) {
     document.head.append(Object.assign(document.createElement("meta"), { name: "theme-color", media, content: color }));
   }
 }
-const Root = lazy(() => (mobile ? import("./mobile/MobileApp.jsx") : import("./Shell.jsx")));
+const Root = lazyView(() => (mobile ? import("./mobile/MobileApp.jsx") : import("./Shell.jsx")));
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
