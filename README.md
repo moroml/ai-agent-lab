@@ -37,6 +37,17 @@ agent-orchestra(並列分解・批評ループ・SSEダッシュボード)と ai
 - 音楽は ACE-Step REST API（既定 `http://127.0.0.1:8001`）。生成物は `music_out/`（mp3 と同名 json のメタ情報）
 - `/hub/*` `/studio/*` `/music/*` はこのPCからは素通し、他の端末からは OpenAI 互換 API のキーが要る
 
+### 別PCから使う (OpenAI 互換 API)
+
+1. このPCで `api_settings.json` の `host` を `0.0.0.0` にし、画面の「接続状態」で共通キーを発行する
+2. このPCで `.\remote-access.ps1` を実行する（管理者への昇格を求められる）。ポート 8765 の受信を
+   Tailscale の範囲（`100.64.0.0/10`）にだけ許可する。同じ LAN から使うなら
+   `.\remote-access.ps1 -RemoteAddress 192.168.11.0/24`、外すなら `.\remote-access.ps1 -Remove`
+3. 別PCのツールに、接続先 `http://<このPCのアドレス>:8765/v1`・発行したキー・モデル名（`auto` か登録名）を設定する。
+   確認は `curl.exe -H "Authorization: Bearer <キー>" http://<このPCのアドレス>:8765/v1/models`
+
+Tailscale Serve は使わない（中継された要求の接続元がこのPC自身に見え、キー発行などこのPC限定の操作まで通るため）。
+
 ## 実行モード(ダッシュボードから選択)
 
 | モード | 内容 |
