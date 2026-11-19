@@ -6,7 +6,7 @@ import { discardRun, fetchModels, fetchRuns, startEngines, startRun } from "../a
 import { fmtAgo } from "../derive.js";
 import AgentOptions, { countDiff, DEFAULTS, useOptionGuards } from "./AgentOptions.jsx";
 import AgentRun, { RunMissing, RunStatus } from "./AgentRun.jsx";
-import { Button, Empty, Field, IconButton, inputCls, Loading, Notice, ScreenHeader, cx } from "./ui.jsx";
+import { Button, Empty, Field, inputCls, Loading, Notice, ScreenHeader, cx } from "./ui.jsx";
 
 const SAMPLE_TASK = "ブロック崩しゲームを作って";
 
@@ -169,7 +169,7 @@ export default function AgentScreen({ eng }) {
 
   return (
     <div ref={rootRef} className="flex h-full flex-col">
-      <ScreenHeader title="エージェント" right={<IconButton label={`依頼のオプション${diff ? `（既定と異なる設定 ${diff}件）` : ""}`} icon={SlidersHorizontal} tone={diff ? "primary" : "muted"} onClick={() => setOptsOpen(true)} />} />
+      <ScreenHeader title="エージェント" />
       <div className="min-h-0 flex-1 space-y-6 overflow-y-auto overscroll-contain px-4 py-4">
         {eng.st === null && <Notice tone="warn">PCの状態を確認できないため、Ollama が動いているか分かりません。</Notice>}
         {eng.st && ollama?.state === "starting" && <Notice tone="info">Ollama を起動しています…</Notice>}
@@ -223,13 +223,16 @@ export default function AgentScreen({ eng }) {
   );
 }
 
+const PAGE = 30;   // 履歴は多いので、少しずつ出す
+
 function RunGroup({ title, runs, plans, onOpen }) {
+  const [shown, setShown] = useState(PAGE);
   if (!runs.length) return null;
   return (
     <div>
       <h3 className="mb-2 text-sm font-semibold text-m-muted">{title}（<span className="m-num">{runs.length}</span>）</h3>
       <ul className="space-y-2">
-        {runs.map((r) => (
+        {runs.slice(0, shown).map((r) => (
           <li key={r.id}>
             <button type="button" onClick={() => onOpen(r.id)}
                     className="flex min-h-12 w-full flex-col gap-1 rounded-xl border border-m-line bg-m-surface px-4 py-3 text-left transition-colors active:bg-m-sunken motion-reduce:transition-none">
@@ -247,6 +250,11 @@ function RunGroup({ title, runs, plans, onOpen }) {
           </li>
         ))}
       </ul>
+      {runs.length > shown && (
+        <Button className="mt-2 w-full" onClick={() => setShown((n) => n + PAGE)}>
+          さらに表示（残り <span className="m-num">{runs.length - shown}</span>件）
+        </Button>
+      )}
     </div>
   );
 }

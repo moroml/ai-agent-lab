@@ -74,7 +74,7 @@ html[data-ui="mobile"] body { background-color: var(--m-bg); }
 .m-md pre { background: var(--m-sunken); border-color: var(--m-line); color: var(--m-fg); font-size: 0.875rem; }
 
 /* 下から出るシート。動きは「減らす」設定が無いときだけ */
-dialog.m-sheet { max-width: none; max-height: none; }
+dialog.m-sheet { max-width: none; }
 dialog.m-sheet::backdrop { background: var(--m-scrim); }
 @media (prefers-reduced-motion: no-preference) {
   dialog.m-sheet[open] { animation: m-sheet-in 250ms cubic-bezier(0, 0, 0, 1); }

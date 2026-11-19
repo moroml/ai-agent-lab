@@ -1,10 +1,10 @@
 // スマホ版の外枠。上に「PCの稼働状況」の1行、下に種類のタブ。画面の中身は種類ごとの *Screen.jsx。
 // 一度開いた画面は隠すだけで残す (切り替えても生成中の追跡や会話の受信が途切れないように)。
-import { Suspense, useCallback, useEffect, useState } from "react";
+import { Component, Suspense, useCallback, useEffect, useState } from "react";
 import { Bot, ChevronRight, Clapperboard, Image as ImageIcon, MessageSquare, Music } from "lucide-react";
 import { NEEDS, useEngines } from "../components/EngineButton.jsx";
 import { lazyView } from "../lazyView.js";
-import { cx, Loading, Notice, Sheet } from "./ui.jsx";
+import { Button, cx, Loading, Notice, Sheet } from "./ui.jsx";
 
 const ChatScreen = lazyView(() => import("./ChatScreen.jsx"));
 const AgentScreen = lazyView(() => import("./AgentScreen.jsx"));
@@ -40,6 +40,22 @@ function statusOf(eng, kind) {
   return { tone: "ok", text: "稼働中", detail: loaded.length ? loaded.map((m) => m.name).join(" / ") : "モデル未読込" };
 }
 
+/** 1つの画面が落ちても、ほかのタブと外枠は使い続けられるようにする */
+class ScreenBoundary extends Component {
+  state = { error: null };
+  static getDerivedStateFromError(error) { return { error }; }
+  render() {
+    if (!this.state.error) return this.props.children;
+    return (
+      <div className="space-y-3 p-4">
+        <Notice tone="error">{`この画面を表示できませんでした。
+${this.state.error.message}`}</Notice>
+        <Button variant="primary" className="w-full" onClick={() => window.location.reload()}>画面を読み込み直す</Button>
+      </div>
+    );
+  }
+}
+
 const LAMP = { ok: "bg-m-primary", wait: "bg-m-warning m-pulse", warn: "bg-m-warning", error: "bg-m-danger" };
 
 export default function MobileApp() {
@@ -64,7 +80,9 @@ export default function MobileApp() {
   useEffect(() => setVisited((v) => (v.has(kind) ? v : new Set(v).add(kind))), [kind]);
   const pane = (id, el) => visited.has(id) && (
     <div className={kind === id ? "h-full" : "hidden"}>
-      <Suspense fallback={<Loading text="画面を読み込んでいます…" />}>{el}</Suspense>
+      <ScreenBoundary>
+        <Suspense fallback={<Loading text="画面を読み込んでいます…" />}>{el}</Suspense>
+      </ScreenBoundary>
     </div>
   );
 
@@ -116,9 +134,11 @@ export default function MobileApp() {
       </nav>
 
       <Sheet open={enginesOpen} onClose={() => setEnginesOpen(false)} title="エンジン">
-        <Suspense fallback={<Loading />}>
-          <EnginesScreen eng={eng} />
-        </Suspense>
+        <ScreenBoundary>
+          <Suspense fallback={<Loading />}>
+            <EnginesScreen eng={eng} />
+          </Suspense>
+        </ScreenBoundary>
       </Sheet>
     </div>
   );
