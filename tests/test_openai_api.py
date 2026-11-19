@@ -83,6 +83,8 @@ def test_bind_host_default_and_env(monkeypatch):
 
 
 class _FakeRequest:
+    cookies = {}
+
     def __init__(self, headers):
         self.headers = headers
 
@@ -204,3 +206,65 @@ def test_key_issuance_rejects_cross_site_origin():
         assert getattr(e, "status_code", None) == 403
     else:
         raise AssertionError("cross-site origin must be rejected")
+
+
+def _remote_app(monkeypatch, key="k"):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    monkeypatch.setattr(openai_api, "api_key", lambda: key)
+    monkeypatch.setattr(openai_api, "model_keys", lambda: {"m": "mk"})
+    monkeypatch.setattr(openai_api, "LOGIN_FAIL_DELAY_S", 0)
+    app = FastAPI()
+    app.middleware("http")(openai_api.remote_guard)
+    openai_api.register(app)
+    app.get("/runs")(lambda: {"ok": True})
+    app.get("/")(lambda: {"ui": True})
+    return app, lambda host: TestClient(app, base_url="http://pc:8765" if host != "127.0.0.1" else "http://127.0.0.1:8765",
+                                        client=(host, 50000))
+
+
+def test_remote_guard_requires_login_or_common_key(monkeypatch):
+    app, client = _remote_app(monkeypatch)
+    remote = client("100.64.0.9")
+    assert remote.get("/runs").status_code == 401
+    assert "接続コード" in remote.get("/").text and remote.get("/").status_code == 401   # 画面の入口はログイン画面
+    assert remote.get("/runs", headers={"Authorization": "Bearer k"}).status_code == 200
+    assert remote.get("/runs", headers={"Authorization": "Bearer mk"}).status_code == 401   # モデル専用キーは /v1 だけ
+    assert remote.get("/runs", headers={"Authorization": "Bearer k", "Origin": "https://evil.example"}).status_code == 403
+    local = client("127.0.0.1")
+    assert local.get("/runs", headers={"Host": "127.0.0.1:8765"}).status_code == 200   # このPCからは素通し
+    assert local.get("/runs", headers={"Host": "evil.example"}).status_code == 403     # DNS リバインディング
+    assert local.get("/runs", headers={"Host": "127.0.0.1:8765", "Origin": "https://evil.example"}).status_code == 403
+
+
+def test_remote_guard_blocks_everything_without_common_key(monkeypatch):
+    app, client = _remote_app(monkeypatch, key="")
+    assert client("100.64.0.9").get("/runs").status_code == 403
+    monkeypatch.setattr(openai_api, "model_keys", lambda: {})
+    assert client("100.64.0.9").get("/v1/models").status_code == 403   # キーが1つも無ければ /v1 も外へ出さない
+    assert client("100.64.0.9").post("/login", json={"secret": ""}).status_code == 401
+
+
+def test_pair_code_logs_in_once_and_only_local_can_issue(monkeypatch):
+    app, client = _remote_app(monkeypatch)
+    remote = client("100.64.0.9")
+    code = client("127.0.0.1").post("/login/code").json()["code"]
+    assert remote.post("/login", json={"secret": "000000" if code != "000000" else "111111"}).status_code == 401
+    assert remote.post("/login", json={"secret": code}).status_code == 200
+    assert remote.get("/runs").status_code == 200   # Cookie でログイン済み
+    assert remote.post("/login/code").status_code == 403   # ログイン済みでも発行はこのPCだけ
+    assert client("100.64.0.10").post("/login", json={"secret": code}).status_code == 401   # 1回きり
+    monkeypatch.setattr(openai_api, "api_key", lambda: "k2")   # キーの再発行でログアウト
+    assert remote.get("/runs").status_code == 401
+
+
+def test_pair_code_dies_after_wrong_tries_and_expiry(monkeypatch):
+    monkeypatch.setattr(openai_api, "api_key", lambda: "k")
+    code = openai_api.new_pair_code()
+    wrong = "000000" if code != "000000" else "111111"
+    assert not any(openai_api.redeem(wrong) for _ in range(openai_api.PAIR_TRIES))
+    assert not openai_api.redeem(code)
+    code = openai_api.new_pair_code()
+    openai_api._pair["expires"] = 0
+    assert not openai_api.redeem(code)
+

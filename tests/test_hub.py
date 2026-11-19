@@ -242,6 +242,7 @@ def test_remote_requests_need_api_key(monkeypatch):
     class Req:
         client = type("C", (), {"host": "192.168.1.5"})()
         headers = {"host": "127.0.0.1:8765"}
+        cookies = {}
     monkeypatch.setattr(hub.openai_api, "api_key", lambda: "k")
     with pytest.raises(Exception) as e:
         hub.require_local_or_key(Req())

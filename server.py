@@ -41,6 +41,7 @@ from runs import manager, normalize_snapshot
 from tools import WORKSPACE as PROJECTS_DIR
 
 app = FastAPI(title="AI Agent Lab")
+app.middleware("http")(openai_api.remote_guard)   # このPC以外からはログインか共通キーが要る
 
 # OpenAI互換API (/v1/models, /v1/chat/completions) — openai_api.py 参照
 openai_api.register(app)

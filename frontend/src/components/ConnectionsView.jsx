@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Check, Copy, KeyRound, RefreshCw } from "lucide-react";
-import { fetchApiKeyStatus, generateApiKey, revokeModelKey } from "../api.js";
+import { fetchApiKeyStatus, generateApiKey, newPairCode, revokeModelKey } from "../api.js";
 import { modelName, modelStatusNote, serverDisplayName, shortBaseUrl } from "../derive.js";
 
 // 接続状態パネル: バックエンド/サーバーごとに「今つながっているか・
@@ -53,6 +53,7 @@ function ApiKeyCard({ models }) {
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
   const [model, setModel] = useState("auto");
+  const [pair, setPair] = useState("");
 
   useEffect(() => {
     fetchApiKeyStatus().then(setStatus, (e) => setError(e.message));
@@ -126,6 +127,22 @@ function ApiKeyCard({ models }) {
       )}
       {status?.source === "env" && (
         <p className="mt-1.5 text-xs text-slate-400">環境変数 AAL_API_KEY が優先されるため、画面からは発行できません。</p>
+      )}
+
+      {status && status.source !== "none" && (
+        <div className="mt-4 border-t border-slate-800 pt-3">
+          <p className="text-xs font-semibold text-slate-400">スマホや別PCのブラウザでこの画面を使う</p>
+          <p className="mt-1 text-xs leading-relaxed text-slate-400">
+            相手の端末でこのPCのアドレスを開き、ここで出した接続コードを入力します（5分間・1回きり）。
+            共通キーを再発行すると、接続済みの端末はすべて切れます。
+          </p>
+          <div className="mt-2 flex flex-wrap items-center gap-3">
+            <button onClick={() => run(async () => setPair((await newPairCode()).code))} disabled={busy} className={BTN}>
+              接続コードを出す
+            </button>
+            {pair && <span role="status" className="font-mono text-xl tracking-[0.3em] text-emerald-300">{pair}</span>}
+          </div>
+        </div>
       )}
 
       <div className="mt-4 border-t border-slate-800 pt-3">

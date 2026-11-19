@@ -76,6 +76,8 @@ export const explainInsight = (source, id, model) =>
   }).then(jsonOrThrow);
 
 // ---- OpenAI互換APIのキー(発行はこのPCからのみ) ----
+// このPC以外(スマホ等)から画面にログインするための接続コード(6桁・5分・1回きり)
+export const newPairCode = () => fetch("/login/code", { method: "POST" }).then(jsonOrThrow);
 export const fetchApiKeyStatus = () => fetch("/api-key", { cache: "no-store" }).then(jsonOrThrow);
 const postModel = (url, model) =>
   fetch(url, {

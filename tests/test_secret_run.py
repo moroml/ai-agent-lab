@@ -60,7 +60,7 @@ class _FakeDirect:
 def _run(coro):
     async def main():
         transport = httpx.ASGITransport(app=server.app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
+        async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1:8765") as c:
             return await coro(c)
     return asyncio.run(main())
 

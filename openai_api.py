@@ -18,10 +18,14 @@
   0.0.0.0 にすると LAN / Tailscale から届く。その場合は api_key 設定を強く推奨。
 - キー発行: GUI (接続状態画面) から POST /api-key/generate で api_settings.json に
   生成・保存する。発行系はこのPC (ループバック) からの要求だけ受け付ける。
+- 画面をこのPC以外 (スマホ等) から開く: remote_guard が /v1 以外の全経路で共通キーを求める。
+  ブラウザは POST /login に共通キーか接続コード (このPCの画面で出す6桁・5分・1回きり) を
+  送り、Cookie でログイン状態を持つ。モデル専用キーは /v1 専用で、画面には使えない。
 """
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import hmac
 import json
 import os
@@ -31,14 +35,20 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from fastapi import HTTPException, Request
-from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from pydantic import BaseModel, Field
 
 SETTINGS_FILE = Path(__file__).parent / "api_settings.json"
 TERMINAL = ("done", "error", "cancelled", "interrupted")
 WAIT_TIMEOUT_S = 3600
 POLL_S = 0.25
 LOOPBACK = ("127.0.0.1", "::1", "localhost")
+COOKIE = "aal_session"
+COOKIE_DAYS = 30
+PAIR_TTL_S = 300
+LOGIN_FAIL_DELAY_S = 1   # 総当たりを遅くする
+PAIR_TRIES = 5   # 6桁を総当たりされないよう、この回数まちがえたら接続コードを無効にする
+_pair = {"code": "", "expires": 0.0, "tries": 0}
 
 
 def _settings() -> dict:
@@ -112,14 +122,112 @@ def _require_local(request: Request) -> None:
         raise HTTPException(403, "このページからはAPIキーを発行できません")
 
 
+def session_token() -> str:
+    """ログイン状態を示す Cookie の値。共通キーから導くので、キーを再発行すると全端末がログアウトになる。"""
+    key = api_key()
+    return hashlib.sha256(f"aal-session:{key}".encode()).hexdigest() if key else ""
+
+
+def has_session(request: Request) -> bool:
+    token = session_token()
+    return bool(token) and hmac.compare_digest((request.cookies.get(COOKIE) or "").encode(), token.encode())
+
+
+def new_pair_code() -> str:
+    _pair.update(code=f"{secrets.randbelow(10**6):06d}", expires=time.monotonic() + PAIR_TTL_S, tries=0)
+    return _pair["code"]
+
+
+def redeem(secret: str) -> bool:
+    """共通キーか有効な接続コードなら True。接続コードは1回使うか PAIR_TRIES 回まちがえると無効になる。"""
+    key = api_key()
+    if not key:
+        return False
+    if hmac.compare_digest(secret.encode(), key.encode()):
+        return True
+    if not _pair["code"] or time.monotonic() > _pair["expires"]:
+        return False
+    ok = hmac.compare_digest(secret.encode(), _pair["code"].encode())
+    _pair["tries"] += 1
+    if ok or _pair["tries"] >= PAIR_TRIES:
+        _pair["code"] = ""
+    return ok
+
+
+LOGIN_PAGE = """<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ai-agent-lab</title>
+<style>
+body{margin:0;min-height:100vh;display:grid;place-items:center;background:#020617;color:#e2e8f0;font-family:system-ui,sans-serif}
+form{width:min(22rem,calc(100vw - 2rem));display:grid;gap:.75rem}
+h1{margin:0;font-size:1.1rem}p{margin:0;font-size:.85rem;color:#94a3b8;line-height:1.6}
+input,button{font:inherit;min-height:2.75rem;border-radius:.5rem;padding:0 .75rem}
+input{border:1px solid #334155;background:#0f172a;color:inherit}
+button{border:0;background:#059669;color:#fff;font-weight:600}button:disabled{opacity:.5}
+#err{color:#fca5a5;min-height:1.4em}
+</style></head><body>
+<form id="f">
+<h1>ai-agent-lab に接続</h1>
+<p>ai-agent-lab を動かしているPCの画面「接続状態」で接続コードを出し、ここに入力します。共通キーでも入れます。</p>
+<label for="s" hidden>接続コードまたは共通キー</label>
+<input id="s" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="接続コード（6桁）または共通キー" required>
+<button id="b">接続</button>
+<p id="err" role="alert"></p>
+</form>
+<script>
+const f=document.getElementById("f"),b=document.getElementById("b"),err=document.getElementById("err");
+f.addEventListener("submit",async(e)=>{e.preventDefault();b.disabled=true;err.textContent="";
+try{const r=await fetch("/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({secret:document.getElementById("s").value})});
+if(r.ok)return location.reload();err.textContent=(await r.json()).detail||"接続できませんでした";}
+catch{err.textContent="接続できませんでした";}b.disabled=false;});
+</script></body></html>"""
+
+
+async def remote_guard(request: Request, call_next):
+    """このPC以外からの要求は、/v1 (自前で認証する) と /login を除き、共通キーかログイン済みの Cookie を求める。
+
+    このPCからの要求は素通しだが、別サイトのページ経由 (CSRF・DNS リバインディング) は接続元が
+    ループバックになるため、Origin と Host で弾く。
+    """
+    client = request.client.host if request.client else ""
+    path = request.url.path
+    host = request.headers.get("host", "")
+    origin = request.headers.get("origin")
+    if origin and urlsplit(origin).netloc != host:
+        return JSONResponse({"detail": "別のサイトからの要求は受け付けません"}, status_code=403)
+    if client in LOOPBACK:
+        if urlsplit("//" + host).hostname not in LOOPBACK:
+            return JSONResponse({"detail": "このPCからは 127.0.0.1 か localhost で開いてください"}, status_code=403)
+        return await call_next(request)
+    key = api_key()
+    # /v1 はモデル専用キーも通すので自前の認証に任せる。キーが1つも無いときは無認証になるので外へは出さない
+    if path == "/login" or (path.startswith("/v1/") and (key or model_keys())):
+        return await call_next(request)
+    if not key:
+        return JSONResponse({"detail": "このPC以外から使うには、ai-agent-lab の画面「接続状態」で共通キーを発行してください"},
+                            status_code=403)
+    bearer = request.headers.get("authorization", "").encode()
+    if has_session(request) or hmac.compare_digest(bearer, f"Bearer {key}".encode()):
+        return await call_next(request)
+    if path == "/" and request.method == "GET":
+        return HTMLResponse(LOGIN_PAGE, status_code=401, headers={"Cache-Control": "no-store"})
+    return JSONResponse({"detail": "ログインが必要です (画面を開き直して接続コードを入力してください)"}, status_code=401)
+
+
+class LoginReq(BaseModel):
+    secret: str = Field(max_length=200)
+
+
 def _check_auth(request: Request) -> str | None:
-    """認証してキーに固定されたモデル名を返す (共通キー・認証なしは None)。
+    """認証してキーに固定されたモデル名を返す (共通キー・ログイン済み・認証なしは None)。
 
     共通キーかモデル専用キーが1つでもあれば認証を必須にする。
     """
     key = api_key()
     mkeys = model_keys()
     if not key and not mkeys:
+        return None
+    if has_session(request):
         return None
     auth = request.headers.get("authorization", "").encode()
     if key and hmac.compare_digest(auth, f"Bearer {key}".encode()):
@@ -259,6 +367,23 @@ def register(app) -> None:
         if not revoke_model_key(model):
             raise HTTPException(404, f"モデル '{model}' のキーはありません")
         return {"ok": True}
+
+    @app.post("/login/code")
+    async def login_code(request: Request):
+        _require_local(request)
+        if not api_key():
+            raise HTTPException(409, "先に共通キーを発行してください")
+        return {"code": new_pair_code(), "ttl": PAIR_TTL_S}
+
+    @app.post("/login")
+    async def login(req: LoginReq, request: Request):
+        if not redeem(req.secret.strip()):
+            await asyncio.sleep(LOGIN_FAIL_DELAY_S)
+            raise HTTPException(401, "接続コードかキーが違います (接続コードは5分・1回きりです)")
+        resp = JSONResponse({"ok": True})
+        resp.set_cookie(COOKIE, session_token(), max_age=COOKIE_DAYS * 86400, httponly=True,
+                        samesite="strict", secure=request.url.scheme == "https")
+        return resp
 
     @app.get("/v1/models")
     async def v1_models(request: Request):
