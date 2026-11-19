@@ -46,7 +46,22 @@ agent-orchestra(並列分解・批評ループ・SSEダッシュボード)と ai
 3. 別PCのツールに、接続先 `http://<このPCのアドレス>:8765/v1`・発行したキー・モデル名（`auto` か登録名）を設定する。
    確認は `curl.exe -H "Authorization: Bearer <キー>" http://<このPCのアドレス>:8765/v1/models`
 
-Tailscale Serve は使わない（中継された要求の接続元がこのPC自身に見え、キー発行などこのPC限定の操作まで通るため）。
+ポート 8765 に Tailscale Serve は使わない（中継された要求の接続元がこのPC自身に見え、キー発行などこのPC限定の操作まで通るため）。
+
+### 別PCで ai-agent-lab を動かし、このPCの Ollama を使う
+
+GPU のあるPCの Ollama を Tailscale Serve で tailnet 内に出し、別PCの ai-agent-lab の接続先（`OLLAMA_BASE`）をそこへ向ける。
+ファイアウォールの変更は要らない。
+
+1. GPU のあるPC: `tailscale serve --bg --http 11434 http://127.0.0.1:11434`（設定済みなら不要。`tailscale serve status` で確認）。
+   Ollama は起動しておく
+2. 別PC: Tailscale を同じ tailnet につなぎ、`curl.exe http://<GPUのPCのマシン名>:11434/api/version` が返ることを確かめる。
+   接続先は**マシン名**で書く（IP や `*.ts.net` の名前は Serve か Ollama に拒否される）
+3. 別PC: リポジトリを置いて `pip install -r requirements.txt`、
+   `[Environment]::SetEnvironmentVariable('OLLAMA_BASE', 'http://<GPUのPCのマシン名>:11434', 'User')` のあと `start.ps1`
+
+別PCでは、画面の「エンジン起動」と画像・動画・音楽・Strata は使えない（どれも GPU のあるPCのローカルを操作するため）。
+RAM併用モデルの可否は別PC側の空きRAMで判定される。両方のPCから同時に使うとモデルの載せ替えが起きて遅くなる。
 
 ## 実行モード(ダッシュボードから選択)
 
