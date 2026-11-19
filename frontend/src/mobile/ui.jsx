@@ -124,7 +124,7 @@ export function Segmented({ label, options, value, onChange }) {
     <div role="radiogroup" aria-label={label} className="flex rounded-xl bg-m-sunken p-1">
       {options.map((o) => (
         <button key={String(o.value)} type="button" role="radio" aria-checked={value === o.value} onClick={() => onChange(o.value)}
-                className={cx("min-h-10 flex-1 rounded-lg px-2 text-sm font-semibold transition-colors motion-reduce:transition-none",
+                className={cx("min-h-12 flex-1 rounded-lg px-2 text-sm font-semibold transition-colors motion-reduce:transition-none",
                   value === o.value ? "bg-m-raised text-m-fg shadow-sm" : "text-m-muted")}>
           {o.label}
         </button>
