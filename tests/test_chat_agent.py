@@ -195,3 +195,111 @@ def test_run_command_refused_before_asking(monkeypatch, workspace, args):
     res = next(e["tool_result"] for e in evs if "tool_result" in e)
     assert not any("approval" in e for e in evs)
     assert res["ok"] is False
+
+
+# ---- 画像・動画 (LGS は差し替え) ----
+import chat_media   # noqa: E402
+
+
+class FakeStudio:
+    """LGS の差し替え。投入と upload を記録し、ジョブは1回目に running、2回目に done を返す。"""
+
+    def __init__(self, monkeypatch, status=("running", "done"), content_type="image/png"):
+        self.submitted, self.uploads, self.polls = [], [], 0
+        self.status, self.content_type = status, content_type
+
+        class Hub:
+            _cat = staticmethod(lambda cfg, name: (cfg.get("categories") or {}).get(name) or {})
+            _music_running = staticmethod(lambda: 0)
+
+            async def free_vram_for_generation(s, cfg, cat, running):
+                return []
+
+            async def _submit_studio(s2, path, body, timeout):
+                self.submitted.append((path, body))
+                return {"job_id": "j1"}
+        hub = Hub()
+        hub.free_vram_for_generation = Hub.free_vram_for_generation.__get__(hub)
+        hub._submit_studio = Hub._submit_studio.__get__(hub)
+        monkeypatch.setattr(chat_media, "_hub", lambda: hub)
+        monkeypatch.setattr(chat_media, "POLL_SEC", 0)
+        monkeypatch.setattr(chat_media, "_lgs", self.lgs)
+
+    async def lgs(self, method, path, *, files=None, timeout=60.0):
+        class R:
+            pass
+        r = R()
+        if path.startswith("/api/jobs/"):
+            st = self.status[min(self.polls, len(self.status) - 1)]
+            self.polls += 1
+            r.json = lambda: {"status": st, "generation_id": 7, "error": "boom"}
+        elif path == "/api/images/upload":
+            self.uploads.append(files["file"][0])
+            r.json = lambda: {"id": 5}
+        else:
+            r.headers, r.content = {"content-type": self.content_type}, b"BYTES"
+        return r
+
+
+def media_run(monkeypatch, replies):
+    chat, calls = fake_chat(replies)
+    monkeypatch.setattr(llm, "chat", chat)
+    return collect(chat_agent.run({"categories": {"image": {"model": "m1", "width": 512, "height": 768}}}, "m",
+                                  [{"role": "user", "content": "q"}], subdir="chat_m1")), calls
+
+
+def test_generate_image_saves_into_workdir_and_reports_file(monkeypatch, workspace):
+    st = FakeStudio(monkeypatch)
+    evs, calls = media_run(monkeypatch, [call("generate_image", prompt="a cat", width=1000), {"content": "できた"}])
+    assert "generate_image" in tool_names(calls[0])
+    assert st.submitted == [("/api/generate", {"model": "m1", "prompt_en": "a cat", "width": 1000, "height": 768})]
+    assert (workspace / "chat_m1" / "image_7.png").read_bytes() == b"BYTES"
+    assert {"file": {"path": "image_7.png", "url": "/projects/chat_m1/image_7.png"}} in evs
+    assert next(e["tool_result"] for e in evs if "tool_result" in e)["ok"]
+
+
+def test_edit_image_uploads_workdir_image(monkeypatch, workspace):
+    st = FakeStudio(monkeypatch, status=("done",))
+    (workspace / "chat_m1").mkdir()
+    (workspace / "chat_m1" / "src.png").write_bytes(b"png")
+    evs, _ = media_run(monkeypatch, [call("edit_image", path="src.png", instruction="make it red"), {"content": "ok"}])
+    assert st.uploads == ["src.png"]
+    assert st.submitted == [("/api/generate-edit", {"source_generation_id": 5, "prompt_en": "make it red"})]
+    assert any("file" in e for e in evs)
+
+
+@pytest.mark.parametrize("path", ["missing.png", "../../x.png", "notes.txt"])
+def test_edit_image_refuses_bad_source(monkeypatch, workspace, path):
+    st = FakeStudio(monkeypatch)
+    evs, _ = media_run(monkeypatch, [call("edit_image", path=path, instruction="x"), {"content": "ok"}])
+    assert next(e["tool_result"] for e in evs if "tool_result" in e)["ok"] is False
+    assert not st.submitted and not any("file" in e for e in evs)
+
+
+def test_generate_video_from_image_uses_4n_plus_1_frames(monkeypatch, workspace):
+    st = FakeStudio(monkeypatch, status=("done",), content_type="video/mp4")
+    (workspace / "chat_m1").mkdir()
+    (workspace / "chat_m1" / "a.jpg").write_bytes(b"jpg")
+    evs, _ = media_run(monkeypatch, [call("generate_video", prompt="walk", image_path="a.jpg", seconds=3), {"content": "ok"}])
+    path, body = st.submitted[0]
+    assert path == "/api/generate-video" and body["frames"] == 73 and body["mode"] == "i2v" and body["source_generation_id"] == 5
+    assert (workspace / "chat_m1" / "video_7.mp4").exists()
+    assert any(e.get("file", {}).get("path") == "video_7.mp4" for e in evs)
+
+
+def test_studio_down_is_an_error_string_not_a_crash(monkeypatch, workspace):
+    FakeStudio(monkeypatch)
+
+    async def down(*a, **k):
+        raise chat_media.MediaError("Local Gen Studio に接続できません")
+    monkeypatch.setattr(chat_media, "_lgs", down)
+    evs, _ = media_run(monkeypatch, [call("generate_image", prompt="x"), {"content": "ok"}])
+    res = next(e["tool_result"] for e in evs if "tool_result" in e)
+    assert res["ok"] is False and "接続できません" in res["summary"]
+    assert evs[-1]["done"]
+
+
+def test_failed_job_is_reported(monkeypatch, workspace):
+    FakeStudio(monkeypatch, status=("error",))
+    evs, _ = media_run(monkeypatch, [call("generate_image", prompt="x"), {"content": "ok"}])
+    assert "生成に失敗しました: boom" in next(e["tool_result"] for e in evs if "tool_result" in e)["summary"]
