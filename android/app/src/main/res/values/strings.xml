@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ai-agent-lab</string>
+    <string name="setup_label">PCのアドレス</string>
+    <string name="setup_hint">my-pc.tailxxxx.ts.net</string>
+    <string name="save">保存</string>
+    <string name="checking">接続を確認しています…</string>
+    <string name="stopped">PC側が止まっています</string>
+    <string name="unreachable">PCに届きません。PCの電源と、スマホの Tailscale がオンかを確認してください。</string>
+    <string name="recheck">もう一度確認</string>
+    <string name="start">ai-agent-lab を起動</string>
+    <string name="starting">起動しています…</string>
+    <string name="change_host">PCのアドレスを変える</string>
+    <string name="start_timeout">起動を確認できませんでした。もう一度お試しください。</string>
+    <string name="download_failed">ダウンロードを開始できませんでした</string>
+</resources>
