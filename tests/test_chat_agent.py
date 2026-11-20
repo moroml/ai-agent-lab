@@ -617,3 +617,174 @@ def test_check_3d_renames_old_bsdf_inputs_before_approval():
         "n.inputs['Coat Roughness'].default_value = 0",
         "n.inputs['Base Color'].default_value = (1, 0, 0, 1)",
         "n.inputs['Emission Strength'].default_value = 2"]
+
+
+# ---- generate_3d (LGS の ComfyUI 上の TRELLIS 2。ComfyUI と Blender は差し替え) ----
+class FakeComfy:
+    """ComfyUI の差し替え。upload・投入・取り消しを記録し、history は status の順に返す。"""
+
+    def __init__(self, monkeypatch, status=(None, "success"), glb=True, busy=False):
+        self.studio = FakeStudio(monkeypatch, status=("done",))
+        self.prompts, self.uploads, self.cancels, self.switched, self.polls = [], [], [], 0, 0
+        self.status, self.glb = status, glb
+        fake = self
+
+        class Switch:
+            SwitchError = type("SwitchError", (Exception,), {})
+            music_busy = asyncio.Lock()
+            settings = staticmethod(lambda cfg: {"comfy_base": "http://comfy.test"})
+
+            @staticmethod
+            async def for_studio(cfg):
+                fake.switched += 1
+                return []
+        if busy:
+            asyncio.run(Switch.music_busy.acquire())
+        chat_media._hub().gpu_switch = Switch
+        monkeypatch.setattr(chat_media, "_comfy", self.comfy)
+        monkeypatch.setattr(chat_media, "_download", self.download)
+        monkeypatch.setattr(chat_media, "POLL_SEC", 0)
+
+    async def comfy(self, cfg, method, path, *, timeout=30.0, **kw):
+        class R:
+            pass
+        r, body = R(), {}
+        if path == "/upload/image":
+            self.uploads.append(kw["files"]["image"][0])
+            body = {"name": kw["files"]["image"][0], "subfolder": "", "type": "input"}
+        elif path == "/prompt":
+            self.prompts.append(kw["json"]["prompt"])
+            body = {"prompt_id": "p1"}
+        elif path.startswith("/history/"):
+            st = self.status[min(self.polls, len(self.status) - 1)]
+            self.polls += 1
+            files = [{"filename": "model3d_x_00001_.glb", "subfolder": "agentlab", "type": "output"}] if self.glb else []
+            msgs = [["execution_error", {"node_type": "KSampler", "exception_message": "HIP out of memory"}]]
+            body = {} if st is None else {"p1": {"status": {"status_str": st, "messages": msgs},
+                                                 "outputs": {"322": {"3d": files}}}}
+        elif path.endswith("/cancel"):
+            self.cancels.append(path)
+        r.json = lambda: body
+        return r
+
+    async def download(self, who, url, tmp, headers=None, params=None):
+        self.downloaded = (url, params)
+        with open(tmp, "wb") as f:
+            f.write(b"glTF")
+        return "model/gltf-binary"
+
+
+def tool_result(evs):
+    return next(e["tool_result"] for e in evs if "tool_result" in e)
+
+
+def test_generate_3d_is_offered_without_commands():
+    assert "generate_3d" in tool_names(chat_agent.schema())
+
+
+def test_generate_3d_from_image_saves_glb_and_preview(monkeypatch, workspace):
+    comfy = FakeComfy(monkeypatch)
+    blender = FakeBlender(monkeypatch)
+    (workspace / "chat_m1").mkdir()
+    (workspace / "chat_m1" / "cup.jpg").write_bytes(b"jpg")
+    evs, _ = media_run(monkeypatch, [call("generate_3d", image_path="cup.jpg"), {"content": "ok"}])
+    assert tool_result(evs)["ok"], tool_result(evs)
+    wf = comfy.prompts[0]
+    assert wf["122"]["inputs"]["image"] == comfy.uploads[0] and comfy.uploads[0].endswith(".jpg")
+    assert len({wf[k]["inputs"]["seed"] for k in chat_media.TRELLIS_SEEDS}) == 1
+    tag = wf["322"]["inputs"]["filename_prefix"].removeprefix("agentlab/model3d_")
+    assert comfy.switched == 1 and comfy.polls == 2 and not comfy.studio.submitted
+    assert comfy.downloaded == ("http://comfy.test/view",
+                                {"filename": "model3d_x_00001_.glb", "subfolder": "agentlab", "type": "output"})
+    assert [e["file"]["path"] for e in evs if "file" in e] == [f"model3d_{tag}.png", f"model3d_{tag}.glb"]
+    argv, _ = blender.spawned[0]
+    assert argv[-2:] == (str(workspace / "chat_m1" / f"model3d_{tag}.glb"), str(workspace / "chat_m1" / f"model3d_{tag}.png"))
+    assert sorted(p.name for p in (workspace / "chat_m1").iterdir()) == ["cup.jpg", f"model3d_{tag}.glb", f"model3d_{tag}.png"]
+
+
+def test_generate_3d_from_prompt_makes_an_object_image_first(monkeypatch, workspace):
+    comfy = FakeComfy(monkeypatch)
+    monkeypatch.setattr(chat_media, "BLENDER", str(workspace / "no-blender.exe"))   # レンダーできなくても glb は返す
+    evs, _ = media_run(monkeypatch, [call("generate_3d", prompt="a red mug"), {"content": "ok"}])
+    path, body = comfy.studio.submitted[0]
+    assert path == "/api/generate" and body["prompt_en"] == "a red mug" + chat_media.OBJECT_HINT
+    assert comfy.uploads[0].endswith(".png")
+    files = [e["file"]["path"] for e in evs if "file" in e]
+    assert files[0] == "image_7.png" and files[1].endswith(".glb") and len(files) == 2
+    assert "確認用の画像は作れませんでした" in tool_result(evs)["summary"]
+
+
+@pytest.mark.parametrize("args", [{}, {"prompt": " "}, {"image_path": "missing.png"}, {"image_path": "../../x.png"}])
+def test_generate_3d_bad_args_submit_nothing(monkeypatch, workspace, args):
+    comfy = FakeComfy(monkeypatch)
+    evs, _ = media_run(monkeypatch, [call("generate_3d", **args), {"content": "ok"}])
+    assert tool_result(evs)["ok"] is False
+    assert not comfy.prompts and not comfy.studio.submitted and not any("file" in e for e in evs)
+
+
+def test_generate_3d_failure_reports_the_node_error(monkeypatch, workspace):
+    comfy = FakeComfy(monkeypatch, status=("error",))
+    (workspace / "chat_m1").mkdir()
+    (workspace / "chat_m1" / "a.png").write_bytes(b"png")
+    evs, _ = media_run(monkeypatch, [call("generate_3d", image_path="a.png"), {"content": "ok"}])
+    assert "KSampler: HIP out of memory" in tool_result(evs)["summary"]
+    assert not comfy.cancels and not any("file" in e for e in evs)
+
+
+def test_generate_3d_without_glb_output_is_an_error(monkeypatch, workspace):
+    FakeComfy(monkeypatch, glb=False)
+    (workspace / "chat_m1").mkdir()
+    (workspace / "chat_m1" / "a.png").write_bytes(b"png")
+    evs, _ = media_run(monkeypatch, [call("generate_3d", image_path="a.png"), {"content": "ok"}])
+    assert "glb が出力されませんでした" in tool_result(evs)["summary"]
+
+
+def test_generate_3d_timeout_cancels_only_its_own_job(monkeypatch, workspace):
+    comfy = FakeComfy(monkeypatch, status=(None,))
+    monkeypatch.setattr(chat_media, "TRELLIS_WAIT", 0.05)
+    monkeypatch.setattr(chat_media, "POLL_SEC", 0.01)
+    (workspace / "chat_m1").mkdir()
+    (workspace / "chat_m1" / "a.png").write_bytes(b"png")
+    evs, _ = media_run(monkeypatch, [call("generate_3d", image_path="a.png"), {"content": "ok"}])
+    assert "止めました" in tool_result(evs)["summary"]
+    assert comfy.cancels == ["/api/jobs/p1/cancel"]
+
+
+def test_generate_3d_waits_for_music_to_finish(monkeypatch, workspace):
+    comfy = FakeComfy(monkeypatch, busy=True)
+    (workspace / "chat_m1").mkdir()
+    (workspace / "chat_m1" / "a.png").write_bytes(b"png")
+    evs, _ = media_run(monkeypatch, [call("generate_3d", image_path="a.png"), {"content": "ok"}])
+    assert "音楽を生成中" in tool_result(evs)["summary"] and not comfy.prompts
+
+
+def test_trellis_workflow_file_matches_the_node_ids():
+    wf = chat_media._load_workflow()
+    assert wf[chat_media.TRELLIS_IMAGE_NODE]["class_type"] == "LoadImage"
+    assert wf[chat_media.TRELLIS_SAVE_NODE]["class_type"] == "SaveGLB"
+    assert all(wf[k]["class_type"] == "KSampler" for k in chat_media.TRELLIS_SEEDS)
+    linked = {v[0] for n in wf.values() for v in n["inputs"].values() if isinstance(v, list)}
+    assert linked <= set(wf)   # つなぎ先がすべてある
+
+
+def test_generate_3d_failure_still_shows_the_image_it_made(monkeypatch, workspace):
+    FakeComfy(monkeypatch, status=("error",))
+    evs, _ = media_run(monkeypatch, [call("generate_3d", prompt="a red mug"), {"content": "ok"}])
+    res = tool_result(evs)
+    assert res["ok"] is False and "image_7.png" in res["summary"]
+    assert [e["file"]["path"] for e in evs if "file" in e] == ["image_7.png"]
+
+
+def test_generate_3d_lost_connection_cancels_the_job(monkeypatch, workspace):
+    comfy = FakeComfy(monkeypatch, status=(None,))
+    inner = comfy.comfy
+
+    async def flaky(cfg, method, path, **kw):
+        if path.startswith("/history/"):
+            raise chat_media.MediaError("ComfyUI に接続できません")
+        return await inner(cfg, method, path, **kw)
+    monkeypatch.setattr(chat_media, "_comfy", flaky)
+    (workspace / "chat_m1").mkdir()
+    (workspace / "chat_m1" / "a.png").write_bytes(b"png")
+    evs, _ = media_run(monkeypatch, [call("generate_3d", image_path="a.png"), {"content": "ok"}])
+    assert "接続できません" in tool_result(evs)["summary"] and comfy.cancels == ["/api/jobs/p1/cancel"]

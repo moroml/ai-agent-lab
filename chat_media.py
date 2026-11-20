@@ -1,4 +1,5 @@
-"""チャットから画像・動画・音楽・3D を作るツール (画像・動画は Local Gen Studio、音楽は ACE-Step、3D は Blender)。
+"""チャットから画像・動画・音楽・3D を作るツール (画像・動画は Local Gen Studio、音楽は ACE-Step、
+3D は LGS の ComfyUI 上の TRELLIS 2 と、承認制の Blender スクリプト)。
 
 結果は会話の作業フォルダ (Toolbox の root) へ保存し、相対パスを返す。画面はそのパスから
 プレビューとリンクを出す。LGS が止まっているときは、例外にせず日本語のエラー文字列を返す。
@@ -6,10 +7,13 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
+import random
 import re
 import shutil
 import time
+import uuid
 
 import httpx
 from fastapi import HTTPException
@@ -26,6 +30,12 @@ BLENDER_WAIT = 180   # Blender を待つ上限秒
 TAIL_BYTES = 20000   # Blender の出力で残す末尾 (エラー文の探索用)
 SCRIPT_MAX = 50000
 NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
+TRELLIS_WAIT = 3600  # TRELLIS 2 (形→高解像度→色の3段) を待つ上限秒
+TRELLIS_WORKFLOW = os.path.join(os.path.dirname(os.path.abspath(__file__)), "workflows", "trellis2_image_to_3d.json")
+TRELLIS_SEEDS = ("3", "12", "18", "23")   # ワークフローの KSampler
+TRELLIS_IMAGE_NODE, TRELLIS_SAVE_NODE = "122", "322"   # LoadImage と SaveGLB
+OBJECT_HINT = (", a single object, whole object in view, centered, three-quarter view, "
+               "plain white background, soft even lighting, no text")
 # 子プロセスへ渡す環境変数は許可リスト方式 (名前が秘密らしくない鍵も漏らさないため)。python / node / git / blender が動く最小限
 ENV_ALLOW = {"PATH", "PATHEXT", "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC", "TEMP", "TMP", "TMPDIR",
              "USERPROFILE", "USERNAME", "USERDOMAIN", "COMPUTERNAME", "HOME", "HOMEDRIVE", "HOMEPATH",
@@ -68,6 +78,13 @@ SCHEMA = [
             "duration": {"type": "number", "description": "長さ(秒)。10〜600。省略で設定の既定"},
             "instrumental": {"type": "boolean", "description": "true で歌なし"}},
             "required": ["prompt"]}}},
+    {"type": "function", "function": {
+        "name": "generate_3d",
+        "description": "3Dモデル(glb)を AI (TRELLIS 2) で作り、確認用の png と一緒に作業フォルダに保存する(10〜30分かかる)。"
+                       "image_path の画像の物体を立体にする。画像が無ければ prompt から先に画像を作ってから立体にする",
+        "parameters": {"type": "object", "properties": {
+            "prompt": {"type": "string", "description": "作りたい物の英語の説明 (image_path が無いとき)"},
+            "image_path": {"type": "string", "description": "元にする画像(作業フォルダからの相対)。背景は自動で除く"}}}}},
 ]
 NAMES = tuple(t["function"]["name"] for t in SCHEMA)
 
@@ -118,6 +135,12 @@ _scene.render.filepath = _png
 bpy.ops.render.render(write_still=True)
 """
 RUNNER_TAIL = _ARGS + _MESHES + 'bpy.ops.export_scene.gltf(filepath=_glb, export_format="GLB")\n' + _RENDER
+# generate_3d の確認用レンダー (固定のスクリプト。モデルの書いたコードは走らせない)。頂点色は glTF の読み込みが材質にする
+PREVIEW_SCRIPT = RUNNER_HEAD + _ARGS + """
+bpy.ops.import_scene.gltf(filepath=_glb)
+_scene.world = bpy.data.worlds.new("bg")
+_scene.world.color = (0.5, 0.5, 0.5)
+""" + _MESHES + _RENDER
 
 
 class MediaError(Exception):
@@ -298,6 +321,150 @@ async def generate_music(cfg, box, prompt, lyrics=None, duration=None, instrumen
     return f"音楽を作成しました: {rel}", [rel]
 
 
+def _comfy_base(cfg):
+    return _hub().gpu_switch.settings(cfg)["comfy_base"].rstrip("/")
+
+
+async def _comfy(cfg, method, path, *, timeout=30.0, **kw):
+    """LGS の ComfyUI を直接呼ぶ (TRELLIS 2 は LGS の API に無いため)。失敗は MediaError。"""
+    try:
+        async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
+            resp = await client.request(method, _comfy_base(cfg) + path, **kw)
+    except httpx.HTTPError as exc:
+        raise MediaError("ComfyUI に接続できません。Local Gen Studio を起動してから、もう一度頼んでください"
+                         f" ({exc.__class__.__name__})") from exc
+    if resp.status_code >= 400:
+        raise MediaError(f"ComfyUI: HTTP {resp.status_code} {resp.text[:500]}")
+    return resp
+
+
+async def _cancel_comfy(cfg, pid):
+    """このジョブだけを止める (実行中なら中断、待ち行列なら外す。他のジョブには触れない)。"""
+    try:
+        await _comfy(cfg, "POST", f"/api/jobs/{pid}/cancel", timeout=5)
+    except MediaError:
+        pass
+
+
+async def _queue_comfy(cfg, workflow):
+    """ACE-Step を止めてから ComfyUI に投入する (LGS への投入と同じロックで直列にする)。"""
+    sw = _hub().gpu_switch
+    if sw.music_busy.locked():
+        raise MediaError("音楽を生成中です。終わってから3Dを作ってください")
+    async with sw.music_busy:
+        try:
+            await sw.for_studio(cfg)
+        except sw.SwitchError as exc:
+            raise MediaError(str(exc)) from exc
+        resp = await _comfy(cfg, "POST", "/prompt", json={"prompt": workflow, "client_id": "ai-agent-lab"})
+    return resp.json()["prompt_id"]
+
+
+def _comfy_error(status):
+    for kind, data in status.get("messages") or []:
+        if kind == "execution_error":
+            return f"{data.get('node_type')}: {data.get('exception_message', '').strip()[:500]}"
+        if kind == "execution_interrupted":
+            return "中断されました"
+    return status.get("status_str") or "原因不明"
+
+
+async def _wait_comfy(cfg, pid, limit):
+    """ジョブの完了を待って outputs を返す。時間切れ・呼び出しの取り消し・監視の通信の失敗ではジョブも止める。"""
+    end = time.monotonic() + limit
+    try:
+        while time.monotonic() < end:
+            hist = (await _comfy(cfg, "GET", f"/history/{pid}", timeout=10)).json()
+            if pid in hist:
+                break
+            await asyncio.sleep(POLL_SEC)
+        else:
+            hist = None
+    except (asyncio.CancelledError, MediaError):   # 監視できなくなったら、結果を受け取れないので止める
+        await _cancel_comfy(cfg, pid)
+        raise
+    if hist is None:
+        await _cancel_comfy(cfg, pid)
+        raise MediaError(f"3Dの生成が {limit} 秒以内に終わりませんでした。止めました")
+    status = hist[pid].get("status") or {}
+    if status.get("status_str") != "success":
+        raise MediaError(f"3Dの生成に失敗しました: {_comfy_error(status)}")
+    return hist[pid].get("outputs") or {}
+
+
+def _load_workflow():
+    with open(TRELLIS_WORKFLOW, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _write_text(path, text):
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+
+
+async def _preview_3d(box, glb, png):
+    """glb を Blender でレンダーして png を作る。Blender が無い・失敗したときは False (glb は使える)。"""
+    if not os.path.isfile(BLENDER):
+        return False
+    py = box._safe_path(f".preview_{os.path.basename(png)}.py")
+    await asyncio.to_thread(_write_text, py, PREVIEW_SCRIPT)
+    try:
+        code, _ = await _blender(box, py, glb, png)
+    except MediaError:
+        return False
+    finally:
+        await asyncio.to_thread(_unlink, py)
+    return code == 0 and os.path.isfile(png)
+
+
+async def generate_3d(cfg, box, prompt=None, image_path=None):
+    if image_path:
+        return await _image_to_3d(cfg, box, image_path)
+    if not isinstance(prompt, str) or not prompt.strip():
+        raise ValueError("prompt か image_path のどちらかが要る")
+    _, made = await generate_image(cfg, box, prompt.strip() + OBJECT_HINT)
+    try:
+        text, files = await _image_to_3d(cfg, box, made[0])
+    except MediaError as e:   # 先に作った画像は残っているので、失敗しても画面に出す
+        return f"[生成失敗] {e} (元にした画像 {made[0]} は作業フォルダにあります)", made
+    return text, made + files
+
+
+async def _image_to_3d(cfg, box, image_path):
+    src = box._safe_path(image_path)
+    ext = os.path.splitext(src)[1].lower()
+    if not os.path.isfile(src) or ext not in IMAGE_EXTS:
+        raise MediaError(f"画像ファイル(png/jpg/webp)が作業フォルダに見つかりません: {image_path}")
+    data = await asyncio.to_thread(_read_bytes, src)
+    workflow = await asyncio.to_thread(_load_workflow)
+    tag = uuid.uuid4().hex[:8]
+    up = (await _comfy(cfg, "POST", "/upload/image", files={"image": (f"agentlab_{tag}{ext}", data)},
+                       data={"overwrite": "true"})).json()
+    workflow[TRELLIS_IMAGE_NODE]["inputs"]["image"] = f"{up['subfolder']}/{up['name']}" if up.get("subfolder") else up["name"]
+    seed = random.randrange(1 << 31)
+    for node in TRELLIS_SEEDS:
+        workflow[node]["inputs"]["seed"] = seed
+    workflow[TRELLIS_SAVE_NODE]["inputs"]["filename_prefix"] = f"agentlab/model3d_{tag}"
+    await _free_vram(cfg, "image")
+    outputs = await _wait_comfy(cfg, await _queue_comfy(cfg, workflow), TRELLIS_WAIT)
+    out = next((f for o in outputs.values() for v in o.values() if isinstance(v, list)
+                for f in v if isinstance(f, dict) and str(f.get("filename", "")).endswith(".glb")), None)
+    if out is None:
+        raise MediaError("3Dの生成は終わりましたが glb が出力されませんでした")
+    rel = f"model3d_{tag}.glb"
+    glb, tmp = box._safe_path(rel), box._safe_path(f".{rel}.part")
+    try:
+        await _download("ComfyUI", _comfy_base(cfg) + "/view", tmp,
+                        params={"filename": out["filename"], "subfolder": out.get("subfolder", ""), "type": "output"})
+        await asyncio.to_thread(os.replace, tmp, glb)
+    finally:
+        await asyncio.to_thread(_unlink, tmp)
+    png = f"model3d_{tag}.png"
+    if await _preview_3d(box, glb, box._safe_path(png)):
+        return f"3Dモデルを作成しました: {rel} (確認用の画像 {png})", [png, rel]
+    return f"3Dモデルを作成しました: {rel} (確認用の画像は作れませんでした)", [rel]
+
+
 def safe_env():
     """子プロセスへ渡す環境変数。ENV_ALLOW にある名前だけ (API キー・トークン類は渡さない)。"""
     return {k: v for k, v in os.environ.items()
@@ -381,7 +548,7 @@ async def call(cfg, box, name, args):
     if not isinstance(args, dict):
         return f"[引数エラー] {name}: 引数がオブジェクトでない", []
     fn = {"generate_image": generate_image, "edit_image": edit_image, "generate_video": generate_video,
-          "generate_music": generate_music, "make_3d": make_3d}[name]
+          "generate_music": generate_music, "generate_3d": generate_3d, "make_3d": make_3d}[name]
     try:
         return await fn(cfg, box, **args)
     except MediaError as e:
