@@ -4,7 +4,10 @@ Run を作らない軽い経路のまま、LLM ⇄ ツールのループを回�
 - ファイル系は tools.Toolbox を projects/chat_<会話ID>/ に閉じ込めて使う
 - run_command と make_3d (Blender のスクリプトを実行する) は commands=True (このPCの画面で明示的にオンにしたとき) だけ載せ、
   実行のたびに画面での承認を待つ。
-  作業フォルダの外へは出さない。Web の文章に誘導されたコマンド実行を、承認と SYSTEM の指示の両方で防ぐ
+  安全の境界は承認そのもの: 実行は作業フォルダを起点にし、明白な事故 (denylist・フォルダ外を指す相対/絶対パス) は
+  承認の前に弾き、環境変数の鍵も渡さないが、OS のサンドボックスではない。承認したコマンド・スクリプトは
+  このユーザーの権限で PC 全体に触れられる (別の場所の読み書き・ネットワーク通信を含む)。内容を読んでから承認すること。
+  Web の文章に誘導された実行は、承認と SYSTEM の指示で防ぐ
 - generate_image / edit_image / generate_video / generate_music は結果を作業フォルダへ保存する (chat_media.py)
 - fetch_url は公開アドレスだけを読む(このPCや LAN 内のサービスを読ませない)
 """
@@ -72,7 +75,7 @@ WEB_SCHEMA = [
 ]
 COMMAND_SCHEMA = {"type": "function", "function": {
     "name": "run_command",
-    "description": "作業フォルダ内でシェルコマンドを実行する(実行前にユーザーの承認が要る。拒否されることがある)。"
+    "description": "作業フォルダを起点にシェルコマンドを実行する(実行前にユーザーの承認が要る。拒否されることがある)。"
                    "結果は exit=コード + stdout/stderr",
     "parameters": {"type": "object", "properties": {
         "command": {"type": "string"},

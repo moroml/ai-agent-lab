@@ -130,7 +130,7 @@ export default function ChatScreen() {
         <div className="mt-4 divide-y divide-m-line">
           <SwitchRow icon={Wrench} label="ツールを使う" hint="ファイルの作成・Web検索・ページの取得を実際に行う" checked={tools} onChange={chat.setTools} />
           <SwitchRow icon={Terminal} label="コマンド実行" disabled={!tools || !chat.canCommands}
-                     hint={chat.canCommands ? "作業フォルダ内で実行。実行のたびにここで承認する" : "このPCの画面からだけ使えます"}
+                     hint={chat.canCommands ? "実行のたびにここで承認する。承認した内容はPC全体に触れられる" : "このPCの画面からだけ使えます"}
                      checked={tools && chat.commands && chat.canCommands} onChange={chat.setCommands} />
           <SwitchRow icon={Brain} label="考えてから答える" hint="遅くなるが、難しい質問に強い" checked={think} onChange={chat.setThink} />
           <SwitchRow icon={EyeOff} label="シークレット" hint="会話を保存せず、終えるときに作成ファイルごと消す" checked={!!secret}

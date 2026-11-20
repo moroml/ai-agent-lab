@@ -88,7 +88,7 @@ export default function ChatView() {
             aria-pressed={tools && commands && canCommands}
             disabled={!tools || !canCommands}
             className={`flex min-h-10 items-center gap-1 rounded-lg border px-2.5 text-xs disabled:opacity-40 ${tools && commands && canCommands ? "border-amber-500/40 bg-amber-500/10 text-amber-200" : "border-slate-700 text-slate-400"}`}
-            title={canCommands ? "オンで作業フォルダ内のコマンド実行を許す（実行のたびにここで承認）" : "コマンド実行はこのPCの画面からだけ使えます"}
+            title={canCommands ? "オンでコマンド実行を許す（作業フォルダが起点。実行のたびにここで承認。承認したものはPC全体に触れられるので内容を読むこと）" : "コマンド実行はこのPCの画面からだけ使えます"}
           >
             <Terminal size={14} aria-hidden="true" /> コマンド{tools && commands && canCommands ? "あり" : "なし"}
           </button>
