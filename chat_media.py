@@ -88,15 +88,18 @@ SCHEMA_3D = {"type": "function", "function": {
 
 # 空のシーンから始め、書き出しと確認用のレンダーを後ろに足す (書き出しを先にして、レンダーが落ちても glb は残す)
 RUNNER_HEAD = "import bpy\nbpy.ops.wm.read_factory_settings(use_empty=True)\n"
-RUNNER_TAIL = """
+_ARGS = """
 import sys
 import mathutils
 _glb, _png = sys.argv[sys.argv.index("--") + 1:][:2]
 _scene = bpy.context.scene
+"""
+_MESHES = """
 _meshes = [o for o in _scene.objects if o.type == "MESH"]
 if not _meshes:
     raise RuntimeError("メッシュがありません。スクリプトで形を作ること")
-bpy.ops.export_scene.gltf(filepath=_glb, export_format="GLB")
+"""
+_RENDER = """
 _pts = [o.matrix_world @ mathutils.Vector(c) for o in _meshes for c in o.bound_box]
 _lo = mathutils.Vector([min(p[i] for p in _pts) for i in range(3)])
 _hi = mathutils.Vector([max(p[i] for p in _pts) for i in range(3)])
@@ -114,6 +117,7 @@ _scene.render.resolution_x = _scene.render.resolution_y = 768
 _scene.render.filepath = _png
 bpy.ops.render.render(write_still=True)
 """
+RUNNER_TAIL = _ARGS + _MESHES + 'bpy.ops.export_scene.gltf(filepath=_glb, export_format="GLB")\n' + _RENDER
 
 
 class MediaError(Exception):
@@ -333,12 +337,8 @@ def _prepare_3d(py, source, olds):
         _unlink(old)
 
 
-async def make_3d(cfg, box, name, script):
-    if not os.path.isfile(BLENDER):
-        raise MediaError(f"Blender が見つかりません: {BLENDER} (環境変数 BLENDER_EXE で場所を指定できます)")
-    py = box._safe_path(f"{name}.py")
-    glb, png = box._safe_path(f"{name}.glb"), box._safe_path(f"{name}.png")
-    await asyncio.to_thread(_prepare_3d, py, RUNNER_HEAD + script + "\n" + RUNNER_TAIL, (glb, png))
+async def _blender(box, py, glb, png):
+    """Blender で py を走らせ (glb, png を引数に渡す)、終了コードと出力の末尾を返す。時間切れは MediaError。"""
     proc = await asyncio.create_subprocess_exec(
         BLENDER, "-b", "--factory-startup", "--python-exit-code", "1", "--python", py, "--", glb, png,
         cwd=box.root, env=safe_env(), stdin=asyncio.subprocess.DEVNULL,
@@ -352,10 +352,19 @@ async def make_3d(cfg, box, name, script):
         if proc.returncode is None:
             proc.kill()
             await proc.wait()
-    text = out.decode("utf-8", errors="replace")
-    if proc.returncode != 0 or not (os.path.isfile(glb) and os.path.isfile(png)):
+    return proc.returncode, out.decode("utf-8", errors="replace")
+
+
+async def make_3d(cfg, box, name, script):
+    if not os.path.isfile(BLENDER):
+        raise MediaError(f"Blender が見つかりません: {BLENDER} (環境変数 BLENDER_EXE で場所を指定できます)")
+    py = box._safe_path(f"{name}.py")
+    glb, png = box._safe_path(f"{name}.glb"), box._safe_path(f"{name}.png")
+    await asyncio.to_thread(_prepare_3d, py, RUNNER_HEAD + script + "\n" + RUNNER_TAIL, (glb, png))
+    code, text = await _blender(box, py, glb, png)
+    if code != 0 or not (os.path.isfile(glb) and os.path.isfile(png)):
         tail = text[text.rfind("Traceback"):] if "Traceback" in text else text
-        raise MediaError(f"Blender のスクリプトが失敗しました (exit={proc.returncode}):\n{tail[-2500:]}")
+        raise MediaError(f"Blender のスクリプトが失敗しました (exit={code}):\n{tail[-2500:]}")
     return f"3Dモデルを作成しました: {name}.glb (確認用の画像 {name}.png)。スクリプトは {name}.py", [f"{name}.png", f"{name}.glb"]
 
 
