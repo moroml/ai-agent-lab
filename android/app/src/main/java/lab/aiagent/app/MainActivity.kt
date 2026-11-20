@@ -35,7 +35,7 @@ class MainActivity : AppCompatActivity() {
     private var webView: WebView? = null
     private var webState: Bundle? = null
     private var fileCallback: ValueCallback<Array<Uri>>? = null
-    private var job = 0 // 古いバックグラウンド処理の結果を捨てるための世代番号
+    @Volatile private var job = 0 // 古いバックグラウンド処理の結果を捨てるための世代番号
 
     private lateinit var root: ViewGroup
     private lateinit var nativeScreen: View
@@ -126,6 +126,7 @@ class MainActivity : AppCompatActivity() {
                     .substringBefore('/').substringBefore(':')
                 if (h.isNotEmpty()) {
                     host = h
+                    webState = null // 前のアドレスで開いていた画面は戻さない
                     prefs.edit().putString("host", h).apply()
                     check()
                 }
@@ -209,7 +210,11 @@ class MainActivity : AppCompatActivity() {
         w.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 if (request.url.host == host) return false
-                startActivity(Intent(Intent.ACTION_VIEW, request.url))
+                try {
+                    startActivity(Intent(Intent.ACTION_VIEW, request.url))
+                } catch (e: Exception) {
+                    Toast.makeText(this@MainActivity, R.string.open_failed, Toast.LENGTH_SHORT).show()
+                }
                 return true
             }
 

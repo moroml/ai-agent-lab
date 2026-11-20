@@ -13,4 +13,5 @@
     <string name="change_host">PCのアドレスを変える</string>
     <string name="start_timeout">起動を確認できませんでした。もう一度お試しください。</string>
     <string name="download_failed">ダウンロードを開始できませんでした</string>
+    <string name="open_failed">このリンクを開けるアプリがありません</string>
 </resources>
