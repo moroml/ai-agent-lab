@@ -36,11 +36,14 @@ export default function ImageScreen({ eng, onToVideo }) {
   const [favOnly, setFavOnly] = useState(false);
   const [armed, setArmed] = useArmed();
   const promptRef = useRef(null);
+  const sent = useRef(null);   // 生成に出した時点の入力
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
   const [job, startJob] = useStudioJob((j) => {
     setBusy("");
     if (j.status === "error") setError(j.error || j.progress_text || "生成に失敗しました。もう一度お試しください。");
+    // できあがったら入力を空に戻す (生成中に書き換えた文は残す)
+    if (j.status === "done") setForm((f) => (f.ja === sent.current?.ja && f.en.trim() === sent.current?.en ? { ...f, ja: "", en: "", enFrom: "" } : f));
     reload();
   });
 
@@ -104,6 +107,7 @@ export default function ImageScreen({ eng, onToVideo }) {
       setBusy("送信しています…");
       const seed = form.seed === "" ? null : Number(form.seed);
       const res = await generateImage({ model: form.model, prompt_en: en, prompt_ja: form.ja, negative_en: form.negative, width: size.w, height: size.h, seed });
+      sent.current = { ja: form.ja, en: en.trim() };
       startJob(res.job_id);
       setBusy(res.gpu_switch?.length ? `${res.gpu_switch.join("・")}して生成しています…` : "生成しています…");
     } catch (e) {

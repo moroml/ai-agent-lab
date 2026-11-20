@@ -107,6 +107,7 @@ export default function MusicScreen({ eng }) {
     setDone("");
     setBusy("make");
     setElapsed(0);
+    const sent = form;
     const t0 = Date.now();
     timer.current = setInterval(() => setElapsed((Date.now() - t0) / 1000), 1000);
     try {
@@ -116,6 +117,8 @@ export default function MusicScreen({ eng }) {
         secret: !!secret,
       });
       setFresh(r.file);
+      // できあがったら入力を空に戻す (生成中に書き換えた欄は残す)
+      setForm((f) => ({ ...f, ...Object.fromEntries(["theme", "style", "lyrics", "title"].filter((k) => f[k] === sent[k]).map((k) => [k, ""])) }));
       setDone(`「${r.title || "曲"}」ができました。${r.gpu_switch?.length ? `GPU の切り替え: ${r.gpu_switch.join("・")}` : ""}`);
       if (secret) setSecret((s) => s && { ...s, tracks: [r, ...s.tracks] });
       else reload();

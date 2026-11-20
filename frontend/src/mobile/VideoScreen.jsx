@@ -1,6 +1,6 @@
 // スマホ版の動画。上から: 起点 (文章 or 画像) → 動きの説明 → 長さ・画角 → 作る → 作った動画。
 // 状態・保存キー・API はPC版 (hub/VideoView.jsx) と共通。
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ExternalLink, Film, ImagePlus, RefreshCw, Trash2, X } from "lucide-react";
 import { cancelJob, enhancePrompt, fetchCategories, generateVideo, studioGallery, trashGeneration } from "../hub/api.js";
 import { usePersisted, useStudioJob } from "../hub/ui.jsx";
@@ -29,11 +29,14 @@ export default function VideoScreen({ eng, source, onSourceChange }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [images, setImages] = useState();   // undefined=読込中 / null=失敗 / []=空
   const [armed, setArmed] = useArmed();
+  const sent = useRef(null);   // 生成に出した時点の入力
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
   const [job, startJob] = useStudioJob((j) => {
     setBusy("");
     if (j.status === "error") setError(j.error || j.progress_text || "生成に失敗しました。もう一度お試しください。");
+    // できあがったら入力を空に戻す (生成中に書き換えた文は残す)
+    if (j.status === "done") setForm((f) => (f.ja === sent.current?.ja && f.en.trim() === sent.current?.en ? { ...f, ja: "", en: "", enFrom: "" } : f));
     reload();
   });
 
@@ -70,6 +73,7 @@ export default function VideoScreen({ eng, source, onSourceChange }) {
         mode: source ? "i2v" : "t2v", source_generation_id: source?.id ?? null, video_model: form.model,
         prompt_en: en, prompt_ja: form.ja, width: frame.w, height: frame.h, frames: len.frames, segments: len.segments,
       });
+      sent.current = { ja: form.ja, en: en.trim() };
       startJob(res.job_id);
       setBusy(res.gpu_switch?.length ? `${res.gpu_switch.join("・")}して生成しています…` : "生成しています…");
     } catch (e) {
