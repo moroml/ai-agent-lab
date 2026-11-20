@@ -290,7 +290,7 @@ async def run(cfg, key, msgs, *, subdir, think=None, temperature=None, opts=None
     {"file"} / {"done", "meta"} を yield する。msgs は書き換える。
     commands=True なら run_command / make_3d を載せ、実行前に {"approval"} を出して resolve_approval を待つ。"""
     opts = opts or {}
-    box = tools.Toolbox(subdir=subdir, approve=False)
+    box = tools.Toolbox(subdir=subdir, approve=False, env=chat_media.safe_env() if commands else None)   # コマンドへ鍵を渡さない
     if not msgs or msgs[0]["role"] != "system":
         msgs.insert(0, {"role": "system", "content": ""})
     msgs[0]["content"] = "\n\n".join(s for s in (

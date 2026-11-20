@@ -458,3 +458,12 @@ def test_make_3d_bad_args_are_refused_before_asking(monkeypatch, workspace, args
     evs, _ = run_3d(monkeypatch, True, **args)
     assert not any("approval" in e for e in evs) and not blender.spawned
     assert next(e["tool_result"] for e in evs if "tool_result" in e)["ok"] is False
+
+
+def test_run_command_does_not_see_secret_env(monkeypatch, workspace):
+    monkeypatch.setenv("MY_API_KEY", "s3cret")
+    monkeypatch.setenv("PLAIN_VALUE", "visible")
+    cmd = "python -c \"import os;print(os.environ.get('MY_API_KEY'), os.environ.get('PLAIN_VALUE'))\""
+    evs, _ = run_commands(monkeypatch, [call("run_command", command=cmd), {"content": "ok"}], True)
+    out = next(e["tool_result"] for e in evs if "tool_result" in e)["summary"]
+    assert "None visible" in out and "s3cret" not in out
