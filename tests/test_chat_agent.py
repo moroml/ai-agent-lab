@@ -123,3 +123,75 @@ def test_research_gets_history_and_survives_errors(monkeypatch):
     hist = [{"role": "user", "content": "A社について"}, {"role": "assistant", "content": "A社は…"}]
     out = asyncio.run(_web_research(bus, bus.create_node("task", "t", ""), {"models": {}}, "m", "株価は？", history=hist))
     assert out == "株価は？" and seen == [["system", "user", "assistant", "user"]]
+
+
+# ---- run_command (承認つき) ----
+def run_commands(monkeypatch, replies, answer, **kw):
+    """answer が True/False なら承認要求にそう答え、None なら答えずに待たせる。"""
+    chat, calls = fake_chat(replies)
+    monkeypatch.setattr(llm, "chat", chat)
+
+    async def go():
+        evs = []
+        async for ev in chat_agent.run({}, "m", [{"role": "user", "content": "q"}], subdir="chat_c1",
+                                       commands=True, **kw):
+            evs.append(ev)
+            if "approval" in ev and answer is not None:
+                assert chat_agent.resolve_approval(ev["approval"]["id"], answer)
+        return evs
+    return asyncio.run(go()), calls
+
+
+def tool_names(tools_):
+    return {t["function"]["name"] for t in tools_}
+
+
+def test_run_command_only_offered_when_enabled(monkeypatch, workspace):
+    assert "run_command" not in tool_names(chat_agent.schema())
+    assert "run_command" in tool_names(chat_agent.schema(commands=True))
+    chat, calls = fake_chat([call("run_command", command="echo hi"), {"content": "ok"}])
+    monkeypatch.setattr(llm, "chat", chat)
+    evs = collect(chat_agent.run({}, "m", [{"role": "user", "content": "q"}], subdir="chat_c0"))
+    assert "run_command" not in tool_names(calls[0])
+    assert not any("approval" in e for e in evs)   # 呼ばれても実行せず、承認も求めない
+    assert next(e["tool_result"] for e in evs if "tool_result" in e)["summary"].startswith("[不正ツール]")
+
+
+def test_run_command_runs_after_approval(monkeypatch, workspace):
+    evs, calls = run_commands(monkeypatch, [call("run_command", command="echo hello-chat"), {"content": "ok"}], True)
+    ap = next(e["approval"] for e in evs if "approval" in e)
+    assert ap["command"] == "echo hello-chat" and ap["working_dir"] == "."
+    res = next(e["tool_result"] for e in evs if "tool_result" in e)
+    assert res["ok"] and "exit=0" in res["summary"]
+    assert (workspace / "chat_c1").is_dir()   # 作業フォルダの中で走った
+
+
+def test_run_command_denied_does_not_run(monkeypatch, workspace):
+    evs, _ = run_commands(monkeypatch, [call("run_command", command="echo x > made.txt"), {"content": "ok"}], False)
+    res = next(e["tool_result"] for e in evs if "tool_result" in e)
+    assert res["ok"] is False and res["summary"] == "[拒否] ユーザーが実行を許可しませんでした"
+    assert not (workspace / "chat_c1" / "made.txt").exists()
+    assert not chat_agent._approvals   # 待ちを残さない
+
+
+def test_run_command_approval_timeout_is_denied(monkeypatch, workspace):
+    monkeypatch.setattr(chat_agent, "APPROVAL_TIMEOUT", 0.05)
+    evs, _ = run_commands(monkeypatch, [call("run_command", command="echo x > made.txt"), {"content": "ok"}], None)
+    res = next(e["tool_result"] for e in evs if "tool_result" in e)
+    assert res["ok"] is False and "承認されなかった" in res["summary"]
+    assert not (workspace / "chat_c1" / "made.txt").exists()
+    assert chat_agent.resolve_approval("nope", True) is False
+
+
+@pytest.mark.parametrize("args", [
+    {"command": "echo hi", "working_dir": "../.."},          # 作業フォルダの外
+    {"command": "echo hi", "working_dir": "C:/Windows"},      # 絶対パス
+    {"command": r"type ..\..\secret.txt"},               # コマンド側の .. 参照
+    {"command": "rm -rf sub"},                                # denylist
+    {"command": ""},
+])
+def test_run_command_refused_before_asking(monkeypatch, workspace, args):
+    evs, _ = run_commands(monkeypatch, [call("run_command", **args), {"content": "ok"}], True)
+    res = next(e["tool_result"] for e in evs if "tool_result" in e)
+    assert not any("approval" in e for e in evs)
+    assert res["ok"] is False
