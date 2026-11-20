@@ -602,3 +602,18 @@ class FakeStream:
     async def read(self, n):
         chunk, self.data = self.data[:n], self.data[n:]
         return chunk
+
+
+def test_check_3d_renames_old_bsdf_inputs_before_approval():
+    args = {"name": "x", "script": "n.inputs['Transmission'].default_value = 1\n"
+                                   'n.inputs["Emission"].default_value = (1, 1, 1, 1)\n'
+                                   "n.inputs['Clearcoat Roughness'].default_value = 0\n"
+                                   "n.inputs['Base Color'].default_value = (1, 0, 0, 1)\n"
+                                   "n.inputs['Emission Strength'].default_value = 2\n"}
+    assert chat_media.check_3d(args) is None
+    assert args["script"].splitlines() == [
+        "n.inputs['Transmission Weight'].default_value = 1",
+        'n.inputs["Emission Color"].default_value = (1, 1, 1, 1)',
+        "n.inputs['Coat Roughness'].default_value = 0",
+        "n.inputs['Base Color'].default_value = (1, 0, 0, 1)",
+        "n.inputs['Emission Strength'].default_value = 2"]

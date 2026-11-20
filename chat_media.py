@@ -295,13 +295,22 @@ def safe_env():
             if k.upper() in ENV_ALLOW or k.upper().startswith(ENV_ALLOW_PREFIX)}
 
 
+# Blender 4 で改名された Principled BSDF の入力。説明に書いてもモデルは古い名前を使い続けた (2026-11-20 実機)
+OLD_BSDF = {"Transmission": "Transmission Weight", "Emission": "Emission Color", "Specular": "Specular IOR Level",
+            "Subsurface": "Subsurface Weight", "Clearcoat": "Coat Weight", "Clearcoat Roughness": "Coat Roughness",
+            "Sheen": "Sheen Weight"}
+OLD_BSDF_RE = re.compile(r"""inputs\[(['"])(%s)\1\]""" % "|".join(sorted(map(re.escape, OLD_BSDF), key=len, reverse=True)))
+
+
 def check_3d(args):
-    """make_3d の引数の検査。問題があれば理由を返す (承認を求める前に弾く)。"""
+    """make_3d の引数の検査。問題があれば理由を返す (承認を求める前に弾く)。
+    古い入力名はここで直す (承認画面には直した後の、実際に実行するスクリプトが出る)。"""
     name, script = args.get("name"), args.get("script")
     if not isinstance(name, str) or not NAME_RE.match(name):
         return "[引数エラー] make_3d: name は英数字・_・- の40字以内"
     if not isinstance(script, str) or not script.strip() or len(script) > SCRIPT_MAX:
         return f"[引数エラー] make_3d: script が空か、{SCRIPT_MAX}字を超えている"
+    args["script"] = OLD_BSDF_RE.sub(lambda m: f"inputs[{m[1]}{OLD_BSDF[m[2]]}{m[1]}]", script)
     return None
 
 
