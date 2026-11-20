@@ -77,7 +77,10 @@ SCHEMA_3D = {"type": "function", "function": {
     "name": "make_3d",
     "description": "Blender (bpy 5.x) の Python スクリプトで3Dモデルを作り、name.glb と、見た目の確認用の name.png を"
                    "作業フォルダに保存する(実行前にユーザーの承認が要る)。script は空のシーンにメッシュとマテリアルを作る部分だけ"
-                   "を書く(カメラ・ライト・書き出し・レンダーは自動)。失敗するとエラー全文が返るので、直して再実行できる",
+                   "を書く(カメラ・ライト・書き出し・レンダーは自動)。失敗するとエラー全文が返るので、直して再実行できる。"
+                   "Blender 4 以降の名前に注意: Principled BSDF の入力は 'Transmission Weight' 'Emission Color' "
+                   "'Subsurface Weight' 'Specular IOR Level'('Transmission' 'Emission' 'Specular' は無い)。"
+                   "色分けは複雑なノードより、部品ごとに Base Color だけのマテリアルを割り当てる方が確実",
     "parameters": {"type": "object", "properties": {
         "name": {"type": "string", "description": "ファイル名の元(英数字・_・-、40字まで)"},
         "script": {"type": "string", "description": "bpy のスクリプト。import bpy から書く"}},
