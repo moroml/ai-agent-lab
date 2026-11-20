@@ -23,6 +23,7 @@ FILE_EXT = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp",
 VIDEO_FPS = 24
 BLENDER = os.environ.get("BLENDER_EXE") or "C:/Program Files/Blender Foundation/Blender 5.2/blender.exe"
 BLENDER_WAIT = 180   # Blender を待つ上限秒
+TAIL_BYTES = 20000   # Blender の出力で残す末尾 (エラー文の探索用)
 SCRIPT_MAX = 50000
 NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
 # 子プロセスへ渡す環境変数は許可リスト方式 (名前が秘密らしくない鍵も漏らさないため)。python / node / git / blender が動く最小限
@@ -301,6 +302,16 @@ def check_3d(args):
     return None
 
 
+async def _read_tail(stream, keep=TAIL_BYTES):
+    """出力を読み切り、末尾 keep バイトだけを返す (Blender は大量に出すので全量を溜めない)。"""
+    tail = bytearray()
+    while chunk := await stream.read(1 << 16):
+        tail += chunk
+        if len(tail) > keep * 2:
+            del tail[:-keep]
+    return bytes(tail[-keep:])
+
+
 def _prepare_3d(py, source, olds):
     """スクリプトを書き、前の試行の出力を消す (残りを成功と取り違えないため)。"""
     os.makedirs(os.path.dirname(py), exist_ok=True)
@@ -321,7 +332,8 @@ async def make_3d(cfg, box, name, script):
         cwd=box.root, env=safe_env(), stdin=asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
     try:
-        out, _ = await asyncio.wait_for(proc.communicate(), BLENDER_WAIT)
+        out = await asyncio.wait_for(_read_tail(proc.stdout), BLENDER_WAIT)
+        await proc.wait()
     except asyncio.TimeoutError:
         raise MediaError(f"Blender が {BLENDER_WAIT} 秒以内に終わりませんでした。形を単純にして再実行してください") from None
     finally:

@@ -384,11 +384,14 @@ def test_generate_music_service_error_is_a_string(monkeypatch, workspace):
 
 
 # ---- make_3d (Blender は差し替え。承認が要る) ----
+TRACE = b"INFO lots of noise" + chr(10).encode() + b"Traceback (most recent call last):" + chr(10).encode() + b"  File x" + chr(10).encode() + b"NameError: foo"
+
+
 class FakeBlender:
     """create_subprocess_exec の差し替え。成功なら引数の glb / png を作り、失敗なら Traceback を返す。"""
 
     def __init__(self, monkeypatch, fail=False):
-        self.spawned, self.fail = [], fail
+        self.spawned, self.fail, self.noise = [], fail, 0
         monkeypatch.setattr(chat_media, "BLENDER", __file__)
         monkeypatch.setattr(chat_media.asyncio, "create_subprocess_exec", self.spawn)
 
@@ -396,17 +399,36 @@ class FakeBlender:
         self.spawned.append((argv, kw))
         fake = self
 
-        class Proc:
-            returncode = 0
+        class Stream:
+            """read() で少しずつ返す。fake.noise があれば先に大量の出力を流す。"""
+            def __init__(self):
+                self.chunks = [b"n" * 65536] * fake.noise if fake.noise else []
+                self.proc = None
 
-            async def communicate(self):
+            async def read(self, n):
+                if self.chunks:
+                    return self.chunks.pop()
+                if self.proc.done:
+                    return b""
+                self.proc.done = True
                 if fake.fail:
-                    self.returncode = 1
-                    return b"INFO lots of noise\nTraceback (most recent call last):\n  File x\nNameError: foo", None
+                    self.proc.returncode = 1
+                    return TRACE
                 glb, png = argv[-2:]
                 open(glb, "wb").write(b"glTF")
                 open(png, "wb").write(b"PNG")
-                return b"Blender quit", None
+                return b"Blender quit"
+
+        class Proc:
+            returncode = 0
+            done = False
+
+            def __init__(self):
+                self.stdout = Stream()
+                self.stdout.proc = self
+
+            async def wait(self):
+                return self.returncode
         return Proc()
 
 
@@ -522,8 +544,8 @@ def test_keepalive_while_waiting_for_approval(monkeypatch, workspace):
         async for ev in chat_agent.run({}, "m", [{"role": "user", "content": "q"}], subdir="chat_k1", commands=True):
             evs.append(ev)
             if "approval" in ev:
-                await asyncio.sleep(0.1)   # 人が考えている間
-                chat_agent.resolve_approval(ev["approval"]["id"], True)
+                # 人が考えている間 (0.1秒後に答える)。読み手が止まると keepalive が出せないので、答えは別に予約する
+                asyncio.get_running_loop().call_later(0.1, chat_agent.resolve_approval, ev["approval"]["id"], True)
         return evs
     evs = asyncio.run(go())
     assert sum(1 for e in evs if e.get("keepalive")) >= 2
@@ -562,3 +584,21 @@ def test_fetch_file_streams_to_disk_without_leftovers(monkeypatch, workspace):
     with pytest.raises(chat_media.MediaError):
         asyncio.run(chat_media._save(box, 9, "video"))
     assert [p.name for p in work.iterdir()] == ["video_9.webm"]
+
+
+def test_blender_output_keeps_only_a_bounded_tail(monkeypatch, workspace):
+    blender = FakeBlender(monkeypatch, fail=True)
+    blender.noise = 200   # 約13MBの出力。末尾のエラー文だけが結果に残る
+    evs, _ = run_3d(monkeypatch, True, name="loud", script="foo()")
+    res = next(e["tool_result"] for e in evs if "tool_result" in e)
+    assert "NameError: foo" in res["summary"]
+    assert len(asyncio.run(chat_media._read_tail(FakeStream(b"x" * 100000), keep=500))) == 500
+
+
+class FakeStream:
+    def __init__(self, data):
+        self.data = data
+
+    async def read(self, n):
+        chunk, self.data = self.data[:n], self.data[n:]
+        return chunk
