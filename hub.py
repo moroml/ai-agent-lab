@@ -402,6 +402,8 @@ async def hub_chat(req: ChatReq, request: Request) -> StreamingResponse:
                 async for ev in stream:
                     if ev.get("done"):
                         meta = ev.get("meta") or {}
+                    elif ev.get("keepalive"):
+                        yield ": keepalive\n\n"   # SSE のコメント行。中継に切られないための無音対策で、画面は読み飛ばす
                     else:
                         # 拒否かどうかは最終回答 (最後のツール実行より後の発言) で見る
                         said = "" if "tool" in ev else said + (ev.get("content") or "")

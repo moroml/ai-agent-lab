@@ -504,3 +504,29 @@ def test_wait_timeout_cancels_the_lgs_job(monkeypatch, workspace):
     res = next(e["tool_result"] for e in evs if "tool_result" in e)
     assert res["ok"] is False and "止めました" in res["summary"]
     assert posted == ["/api/jobs/j1/cancel"]
+
+
+def test_keepalive_while_waiting_for_approval(monkeypatch, workspace):
+    monkeypatch.setattr(chat_agent, "KEEPALIVE_SEC", 0.02)
+    chat, _ = fake_chat([call("run_command", command="echo hi"), {"content": "ok"}])
+    monkeypatch.setattr(llm, "chat", chat)
+
+    async def go():
+        evs = []
+        async for ev in chat_agent.run({}, "m", [{"role": "user", "content": "q"}], subdir="chat_k1", commands=True):
+            evs.append(ev)
+            if "approval" in ev:
+                await asyncio.sleep(0.1)   # 人が考えている間
+                chat_agent.resolve_approval(ev["approval"]["id"], True)
+        return evs
+    evs = asyncio.run(go())
+    assert sum(1 for e in evs if e.get("keepalive")) >= 2
+    assert next(e["tool_result"] for e in evs if "tool_result" in e)["ok"]
+
+
+def test_keepalive_while_generating(monkeypatch, workspace):
+    monkeypatch.setattr(chat_agent, "KEEPALIVE_SEC", 0.02)
+    FakeStudio(monkeypatch, status=("running",) * 8 + ("done",))
+    monkeypatch.setattr(chat_media, "POLL_SEC", 0.01)
+    evs, _ = media_run(monkeypatch, [call("generate_image", prompt="x"), {"content": "ok"}])
+    assert any(e.get("keepalive") for e in evs) and any("file" in e for e in evs)

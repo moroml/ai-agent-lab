@@ -42,6 +42,7 @@ export async function streamChat(body, onEvent, signal) {
     while ((i = buf.indexOf("\n\n")) >= 0) {
       const line = buf.slice(0, i).trim();
       buf = buf.slice(i + 2);
+      // ": keepalive" のようなコメント行 (承認待ち・生成待ちの無音対策) は data: でないので読み飛ばす
       if (line.startsWith("data: ")) onEvent(JSON.parse(line.slice(6)));
     }
   }

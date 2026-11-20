@@ -352,3 +352,17 @@ def test_chat_approval_endpoint(client, monkeypatch):
 
 def test_categories_tells_whether_commands_are_usable(client):
     assert client.get("/hub/categories").json()["can_commands"] is True
+
+
+def test_chat_keepalive_is_an_sse_comment_not_data(client, monkeypatch):
+    seen = []
+    agent_cfg(monkeypatch, seen)
+
+    async def run(cfg, key, msgs, **kw):
+        yield {"keepalive": True}
+        yield {"content": "ok"}
+        yield {"done": True, "meta": {}}
+    monkeypatch.setattr(hub.chat_agent, "run", run)
+    text = client.post("/hub/chat", json=BODY).text
+    assert ": keepalive" in text and "data: " + '{"keepalive' not in text
+    assert all(ln.startswith(("data: ", ":")) for ln in text.split("\n\n") if ln)

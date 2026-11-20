@@ -30,6 +30,7 @@ HISTORY_CHARS = 30000     # これを超えたら古いツール結果から縮�
 FETCH_BYTES = 2_000_000
 SEARCH_BACKENDS = ("yahoo", "google", "auto")   # 実測で安定していた順 (2026-11-17)
 APPROVAL_TIMEOUT = 300    # 承認を待つ秒数。過ぎたら拒否扱い
+KEEPALIVE_SEC = 15       # 承認待ち・生成待ちの間、この間隔で {"keepalive"} を出して中継に切られないようにする
 COMMAND_TIMEOUT = 120     # チャットから走らせるコマンドの上限秒
 UA = {"User-Agent": "Mozilla/5.0 (compatible; ai-agent-lab)"}
 
@@ -246,6 +247,29 @@ def _shrink(msgs):
             m["content"] = m["content"][:300] + "\n…(古い結果のため省略)"
 
 
+class _Done:
+    """_ticks が待っていた処理の結果。"""
+    def __init__(self, value):
+        self.value = value
+
+
+async def _ticks(coro):
+    """coro の完了を待つ間、KEEPALIVE_SEC ごとに {"keepalive"} を yield し、最後に _Done を yield する。"""
+    task = asyncio.ensure_future(coro)
+    try:
+        while not (await asyncio.wait({task}, timeout=KEEPALIVE_SEC))[0]:
+            yield {"keepalive": True}
+        yield _Done(task.result())
+    finally:
+        task.cancel()
+
+
+async def _execute(cfg, box, name, args):
+    if name == "run_command":
+        return await run_approved_command(box, args), []
+    return await chat_media.call(cfg, box, name, args)
+
+
 async def _gated(cfg, box, call_id, name, args):
     """承認が要るツール (run_command / make_3d)。承認の要求 (dict) を yield し、最後に
     (結果の文字列, 作成ファイル) を yield する。"""
@@ -268,7 +292,11 @@ async def _gated(cfg, box, call_id, name, args):
     _approvals[aid] = asyncio.get_running_loop().create_future()
     try:
         yield {"approval": {"id": aid, "call": call_id, "command": shown, "working_dir": wd}}
-        ok = await ask_approval(aid)
+        async for ev in _ticks(ask_approval(aid)):
+            if isinstance(ev, _Done):
+                ok = ev.value
+            else:
+                yield ev
     finally:
         _approvals.pop(aid, None)
     if ok is None:
@@ -277,10 +305,8 @@ async def _gated(cfg, box, call_id, name, args):
         yield "[拒否] ユーザーが実行を許可しませんでした", []
     else:
         try:
-            if name == "run_command":
-                yield await run_approved_command(box, args), []
-            else:
-                yield await chat_media.call(cfg, box, name, args)
+            async for ev in _ticks(_execute(cfg, box, name, args)):
+                yield ev.value if isinstance(ev, _Done) else ev
         except (TypeError, ValueError) as e:
             yield f"[引数エラー] {name}: {e}", []
 
@@ -341,7 +367,11 @@ async def run(cfg, key, msgs, *, subdir, think=None, temperature=None, opts=None
                     else:
                         yield ev
             elif name in chat_media.NAMES:
-                result, made = await chat_media.call(cfg, box, name, args)
+                async for ev in _ticks(chat_media.call(cfg, box, name, args)):
+                    if isinstance(ev, _Done):
+                        result, made = ev.value
+                    else:
+                        yield ev
             else:
                 result = str(await call_tool(box, name, args))
             msgs.append({"role": "tool", "tool_name": name, "content": result})
