@@ -25,7 +25,12 @@ BLENDER = os.environ.get("BLENDER_EXE") or "C:/Program Files/Blender Foundation/
 BLENDER_WAIT = 180   # Blender を待つ上限秒
 SCRIPT_MAX = 50000
 NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
-_SECRET_ENV = re.compile(r"(KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTH)", re.I)
+# 子プロセスへ渡す環境変数は許可リスト方式 (名前が秘密らしくない鍵も漏らさないため)。python / node / git / blender が動く最小限
+ENV_ALLOW = {"PATH", "PATHEXT", "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC", "TEMP", "TMP", "TMPDIR",
+             "USERPROFILE", "USERNAME", "USERDOMAIN", "COMPUTERNAME", "HOME", "HOMEDRIVE", "HOMEPATH",
+             "APPDATA", "LOCALAPPDATA", "PROGRAMDATA", "ALLUSERSPROFILE", "PUBLIC", "OS", "NUMBER_OF_PROCESSORS",
+             "LANG", "TZ", "TERM", "PYTHONIOENCODING", "PYTHONUTF8"}
+ENV_ALLOW_PREFIX = ("PROGRAMFILES", "COMMONPROGRAMFILES", "PROCESSOR_", "LC_")
 
 SCHEMA = [
     {"type": "function", "function": {
@@ -244,8 +249,9 @@ async def generate_music(cfg, box, prompt, lyrics=None, duration=None, instrumen
 
 
 def safe_env():
-    """子プロセスへ渡す環境変数。キー・トークン類は除く。"""
-    return {k: v for k, v in os.environ.items() if not _SECRET_ENV.search(k)}
+    """子プロセスへ渡す環境変数。ENV_ALLOW にある名前だけ (API キー・トークン類は渡さない)。"""
+    return {k: v for k, v in os.environ.items()
+            if k.upper() in ENV_ALLOW or k.upper().startswith(ENV_ALLOW_PREFIX)}
 
 
 def check_3d(args):

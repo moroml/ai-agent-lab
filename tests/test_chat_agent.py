@@ -476,3 +476,12 @@ def test_make_3d_approval_shows_the_whole_script(monkeypatch, workspace):
     shown = next(e["approval"]["command"] for e in evs if "approval" in e)
     assert script in shown and shown.endswith("# LAST")
     assert (workspace / "chat_c1" / "big.py").read_text(encoding="utf-8").count("# pad") == 5000   # 見せたものを実行する
+
+
+def test_safe_env_is_an_allowlist(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    monkeypatch.setenv("DATABASE_URL", "postgres://user:pw@host/db")   # 名前が秘密らしくなくても渡さない
+    monkeypatch.setenv("LC_ALL", "C")
+    env = chat_media.safe_env()
+    assert "ANTHROPIC_API_KEY" not in env and "DATABASE_URL" not in env
+    assert "PATH" in {k.upper() for k in env} and env["LC_ALL"] == "C"
