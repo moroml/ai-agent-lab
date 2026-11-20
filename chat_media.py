@@ -183,22 +183,27 @@ async def _wait(job_id, limit):
     raise MediaError(f"生成が {limit} 秒以内に終わりませんでした。止めました。もう一度頼むか、Local Gen Studio の画面で状況を確認してください")
 
 
-async def _fetch_file(gid, tmp):
-    """LGS の生成物を tmp へストリームで保存して Content-Type を返す (全量をメモリに載せず、書き込みはスレッドで)。"""
-    hub = _hub()
-    cfg = hub.llm.load_config()
+async def _download(who, url, tmp, headers=None, params=None):
+    """url を tmp へストリームで保存して Content-Type を返す (全量をメモリに載せず、書き込みはスレッドで)。"""
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(30, read=120), trust_env=False) as client:
-            async with client.stream("GET", hub.studio_base(cfg) + f"/api/files/{gid}",
-                                     headers={"Authorization": f"Bearer {hub.studio_token(cfg)}"}) as resp:
+            async with client.stream("GET", url, headers=headers, params=params) as resp:
                 if resp.status_code >= 400:
-                    raise MediaError(f"Local Gen Studio: 生成物を取得できません (HTTP {resp.status_code})")
+                    raise MediaError(f"{who}: 生成物を取得できません (HTTP {resp.status_code})")
                 with open(tmp, "wb") as f:
                     async for chunk in resp.aiter_bytes(1 << 16):
                         await asyncio.to_thread(f.write, chunk)
                 return resp.headers.get("content-type", "")
     except httpx.HTTPError as exc:
-        raise MediaError(f"Local Gen Studio から生成物を受け取れません ({exc.__class__.__name__})") from exc
+        raise MediaError(f"{who} から生成物を受け取れません ({exc.__class__.__name__})") from exc
+
+
+async def _fetch_file(gid, tmp):
+    """LGS の生成物を tmp へ保存して Content-Type を返す。"""
+    hub = _hub()
+    cfg = hub.llm.load_config()
+    return await _download("Local Gen Studio", hub.studio_base(cfg) + f"/api/files/{gid}", tmp,
+                           headers={"Authorization": f"Bearer {hub.studio_token(cfg)}"})
 
 
 def _unlink(path):
