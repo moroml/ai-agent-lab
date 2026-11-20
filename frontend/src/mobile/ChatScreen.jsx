@@ -173,7 +173,7 @@ function Message({ m, last, busy, onRegenerate, onApprove }) {
               {s.approval && streaming && (
                 <div role="group" aria-label="コマンドの承認" className="mt-2 space-y-2 rounded-xl border border-m-warning bg-m-warning-soft p-3 text-m-fg">
                   <p>このコマンドを実行しますか？（作業フォルダ: {s.approval.working_dir}）</p>
-                  <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-m-sunken p-2 text-sm">{s.approval.command}</pre>
+                  <pre tabIndex={0} aria-label="実行される内容の全文" className="max-h-64 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-m-sunken p-2 text-sm">{s.approval.command}</pre>
                   <div className="flex gap-2">
                     <Button variant="primary" className="flex-1" onClick={() => onApprove(s.approval.id, true)}>実行</Button>
                     <Button className="flex-1" onClick={() => onApprove(s.approval.id, false)}>拒否</Button>

@@ -467,3 +467,12 @@ def test_run_command_does_not_see_secret_env(monkeypatch, workspace):
     evs, _ = run_commands(monkeypatch, [call("run_command", command=cmd), {"content": "ok"}], True)
     out = next(e["tool_result"] for e in evs if "tool_result" in e)["summary"]
     assert "None visible" in out and "s3cret" not in out
+
+
+def test_make_3d_approval_shows_the_whole_script(monkeypatch, workspace):
+    FakeBlender(monkeypatch)
+    script = "import bpy\n" + "# pad\n" * 5000 + "bpy.ops.mesh.primitive_cube_add()  # LAST"   # 3000字を大きく超える
+    evs, _ = run_3d(monkeypatch, True, name="big", script=script)
+    shown = next(e["approval"]["command"] for e in evs if "approval" in e)
+    assert script in shown and shown.endswith("# LAST")
+    assert (workspace / "chat_c1" / "big.py").read_text(encoding="utf-8").count("# pad") == 5000   # 見せたものを実行する

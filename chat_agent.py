@@ -263,7 +263,7 @@ async def _gated(cfg, box, call_id, name, args):
         shown = args["command"]
         wd = os.path.relpath(box._safe_path(args.get("working_dir", ".")), box.root).replace("\\", "/")
     else:
-        shown, wd = f"Blender で 3D スクリプト {args['name']}.py を実行:\n{args['script'][:3000]}", "."
+        shown, wd = f"Blender で 3D スクリプト {args['name']}.py を実行:\n{args['script']}", "."
     aid = uuid.uuid4().hex[:12]
     _approvals[aid] = asyncio.get_running_loop().create_future()
     try:
