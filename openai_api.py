@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
+import ipaddress
 import json
 import os
 import secrets
@@ -43,6 +44,7 @@ TERMINAL = ("done", "error", "cancelled", "interrupted")
 WAIT_TIMEOUT_S = 3600
 POLL_S = 0.25
 LOOPBACK = ("127.0.0.1", "::1", "localhost")
+TAILNET = ipaddress.ip_network("100.64.0.0/10")   # Tailscale が端末に割り当てる範囲
 COOKIE = "aal_session"
 COOKIE_DAYS = 30
 LOGIN_FAIL_DELAY_S = 1   # 総当たりを遅くする
@@ -119,6 +121,30 @@ def _require_local(request: Request) -> None:
         raise HTTPException(403, "このページからはAPIキーを発行できません")
 
 
+def trust_tailnet() -> bool:
+    """Tailscale の端末をログインなしで通すか。api_settings.json の trust_tailnet を false にすると切れる。"""
+    return _settings().get("trust_tailnet", True) is not False
+
+
+def is_tailnet(request: Request) -> bool:
+    """接続元が Tailscale の端末か (2026-11-20 ユーザー指示: Tailscale 経由ならログイン不要)。
+
+    Tailscale Serve の中継は X-Forwarded-For から実際の端末のアドレスになる。uvicorn が中継として
+    信頼するのは 127.0.0.1 だけなので、LAN から直接来た要求がこのヘッダで成りすますことはできない。
+    このPCのブラウザで開いた別サイトのページは 127.0.0.1 から届くのでヘッダを偽れるが (DNS リバインディング)、
+    Host までは偽れない。Host が Tailscale の名前 (*.ts.net) かアドレスのときだけ通す。
+    """
+    if not trust_tailnet():
+        return False
+    name = urlsplit("//" + request.headers.get("host", "")).hostname or ""
+    try:
+        if not name.endswith(".ts.net") and ipaddress.ip_address(name) not in TAILNET:
+            return False
+        return ipaddress.ip_address(request.client.host if request.client else "") in TAILNET
+    except ValueError:
+        return False
+
+
 def session_token() -> str:
     """ログイン状態を示す Cookie の値。共通キーから導くので、キーを再発行すると全端末がログアウトになる。"""
     key = api_key()
@@ -166,7 +192,7 @@ catch{err.textContent="接続できませんでした";}b.disabled=false;});
 
 
 async def remote_guard(request: Request, call_next):
-    """このPC以外からの要求は、/v1 (自前で認証する) と /login を除き、共通キーかログイン済みの Cookie を求める。
+    """このPC と Tailscale の端末以外からの要求は、/v1 (自前で認証する) と /login を除き、共通キーかログイン済みの Cookie を求める。
 
     このPCからの要求は素通しだが、別サイトのページ経由 (CSRF・DNS リバインディング) は接続元が
     ループバックになるため、Origin と Host で弾く。
@@ -180,6 +206,8 @@ async def remote_guard(request: Request, call_next):
     if client in LOOPBACK:
         if urlsplit("//" + host).hostname not in LOOPBACK:
             return JSONResponse({"detail": "このPCからは 127.0.0.1 か localhost で開いてください"}, status_code=403)
+        return await call_next(request)
+    if is_tailnet(request):
         return await call_next(request)
     key = api_key()
     # /v1 はモデル専用キーも通すので自前の認証に任せる。キーが1つも無いときは無認証になるので外へは出さない
@@ -212,6 +240,8 @@ def _check_auth(request: Request) -> str | None:
     if has_session(request):
         return None
     auth = request.headers.get("authorization", "").encode()
+    if not auth and is_tailnet(request):   # キーを付けて来たときは、モデル専用キーの固定を効かせる
+        return None
     if key and hmac.compare_digest(auth, f"Bearer {key}".encode()):
         return None
     bound = None

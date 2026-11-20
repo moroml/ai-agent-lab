@@ -49,7 +49,7 @@ def test_logged_in_remote_can_operate_but_not_configure(monkeypatch, tmp_path):
     monkeypatch.setattr(llm, "prewarm_default", autoload)
     app = FastAPI()
     system.register(app)
-    c = TestClient(app, base_url="http://127.0.0.1:8765", client=("100.64.0.9", 50000))
+    c = TestClient(app, base_url="http://127.0.0.1:8765", client=("192.168.1.9", 50000))
     common, bound = {"Authorization": "Bearer k"}, {"Authorization": "Bearer mk"}
     assert c.post("/system/autoload", json={"enabled": False}, headers=common).status_code == 200
     assert c.post("/system/autoload", json={"enabled": False}, headers=bound).status_code == 403   # モデル専用キーは不可

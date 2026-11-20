@@ -84,6 +84,7 @@ def test_bind_host_default_and_env(monkeypatch):
 
 class _FakeRequest:
     cookies = {}
+    client = None
 
     def __init__(self, headers):
         self.headers = headers
@@ -219,13 +220,13 @@ def _remote_app(monkeypatch, key="k"):
     openai_api.register(app)
     app.get("/runs")(lambda: {"ok": True})
     app.get("/")(lambda: {"ui": True})
-    return app, lambda host: TestClient(app, base_url="http://pc:8765" if host != "127.0.0.1" else "http://127.0.0.1:8765",
+    return app, lambda host, base="http://pc.tail.ts.net:8765": TestClient(app, base_url=base if host != "127.0.0.1" else "http://127.0.0.1:8765",
                                         client=(host, 50000))
 
 
 def test_remote_guard_requires_login_or_common_key(monkeypatch):
     app, client = _remote_app(monkeypatch)
-    remote = client("100.64.0.9")
+    remote = client("192.168.1.9")
     assert remote.get("/runs").status_code == 401
     assert "共通キー" in remote.get("/").text and remote.get("/").status_code == 401   # 画面の入口はログイン画面
     assert remote.get("/runs", headers={"Authorization": "Bearer k"}).status_code == 200
@@ -239,15 +240,30 @@ def test_remote_guard_requires_login_or_common_key(monkeypatch):
 
 def test_remote_guard_blocks_everything_without_common_key(monkeypatch):
     app, client = _remote_app(monkeypatch, key="")
-    assert client("100.64.0.9").get("/runs").status_code == 403
+    assert client("192.168.1.9").get("/runs").status_code == 403
     monkeypatch.setattr(openai_api, "model_keys", lambda: {})
-    assert client("100.64.0.9").get("/v1/models").status_code == 403   # キーが1つも無ければ /v1 も外へ出さない
-    assert client("100.64.0.9").post("/login", json={"secret": ""}).status_code == 401
+    assert client("192.168.1.9").get("/v1/models").status_code == 403   # キーが1つも無ければ /v1 も外へ出さない
+    assert client("192.168.1.9").post("/login", json={"secret": ""}).status_code == 401
+
+
+def test_tailnet_device_needs_no_login(monkeypatch):
+    app, client = _remote_app(monkeypatch, key="")
+    tail = client("100.64.0.9")
+    assert tail.get("/runs").status_code == 200 and tail.get("/").json() == {"ui": True}   # キーが無くても通す
+    assert tail.get("/runs", headers={"Origin": "https://evil.example"}).status_code == 403
+    assert tail.post("/api-key/generate").status_code == 403   # キーの発行はこのPCだけ
+    assert client("100.64.0.9", "http://100.64.0.1:8765").get("/runs").status_code == 200
+    assert client("100.64.0.9", "http://evil.example").get("/runs").status_code == 403   # このPCのブラウザからの偽装
+    bound = _FakeRequest({"authorization": "Bearer mk"})
+    bound.client = _FakeClient("100.64.0.9")
+    assert openai_api._check_auth(bound) == "m"   # キーを付けて来たら固定を効かせる
+    monkeypatch.setattr(openai_api, "trust_tailnet", lambda: False)
+    assert tail.get("/runs").status_code == 403
 
 
 def test_login_with_common_key_sets_session(monkeypatch):
     app, client = _remote_app(monkeypatch)
-    remote = client("100.64.0.9")
+    remote = client("192.168.1.9")
     assert remote.post("/login", json={"secret": "000000"}).status_code == 401
     assert remote.post("/login", json={"secret": "k"}).status_code == 200
     assert remote.get("/runs").status_code == 200   # Cookie でログイン済み

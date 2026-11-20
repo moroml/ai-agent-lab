@@ -59,6 +59,8 @@ def require_local_or_key(request: Request) -> None:
         if urlsplit("//" + request.headers.get("host", "")).hostname not in LOCAL_HOSTS:
             raise HTTPException(403, "このPCからは 127.0.0.1 か localhost で開いてください")
         return
+    if openai_api.is_tailnet(request):
+        return
     if not openai_api.api_key():
         raise HTTPException(403, "このPC以外から使うには OpenAI 互換 API のキーを発行してください")
     openai_api._check_auth(request)
