@@ -303,3 +303,75 @@ def test_failed_job_is_reported(monkeypatch, workspace):
     FakeStudio(monkeypatch, status=("error",))
     evs, _ = media_run(monkeypatch, [call("generate_image", prompt="x"), {"content": "ok"}])
     assert "生成に失敗しました: boom" in next(e["tool_result"] for e in evs if "tool_result" in e)["summary"]
+
+
+def test_generate_music_moves_mp3_into_workdir(monkeypatch, workspace, tmp_path):
+    src = tmp_path / "ab12cd34ef56.mp3"
+    src.write_bytes(b"MP3")
+    seen = {}
+
+    class Music:
+        MusicError = type("MusicError", (Exception,), {})
+
+        @staticmethod
+        async def generate_music(cfg, key, prompt, **kw):
+            seen.update(key=key, prompt=prompt, **kw)
+            return {"path": str(src), "file": src.name}
+
+    class Switch:
+        SwitchError = type("SwitchError", (Exception,), {})
+        music_busy = asyncio.Lock()
+
+        @staticmethod
+        async def for_music(cfg):
+            return []
+
+    class Hub:
+        music, gpu_switch = Music, Switch
+        _cat = staticmethod(lambda cfg, name: (cfg.get("categories") or {}).get(name) or {})
+        _music_running = staticmethod(lambda: 0)
+
+        @staticmethod
+        async def free_vram_for_generation(cfg, cat, running):
+            seen["unload"] = cat.get("unload_llm")
+            return []
+    monkeypatch.setattr(chat_media, "_hub", lambda: Hub)
+    chat, calls = fake_chat([call("generate_music", prompt="lofi", duration=20, instrumental=True), {"content": "ok"}])
+    monkeypatch.setattr(llm, "chat", chat)
+    cfg = {"categories": {"music": {"model": "mus", "duration": 30, "unload_llm": True}}}
+    evs = collect(chat_agent.run(cfg, "m", [{"role": "user", "content": "q"}], subdir="chat_m2"))
+    assert seen == {"key": "mus", "prompt": "lofi", "lyrics": None, "duration": 20.0, "instrumental": True, "unload": True}
+    assert (workspace / "chat_m2" / "music_ab12cd34.mp3").read_bytes() == b"MP3" and not src.exists()
+    assert any(e.get("file", {}).get("url") == "/projects/chat_m2/music_ab12cd34.mp3" for e in evs)
+
+
+def test_generate_music_service_error_is_a_string(monkeypatch, workspace):
+    class Music:
+        MusicError = type("MusicError", (Exception,), {})
+
+        @staticmethod
+        async def generate_music(cfg, key, prompt, **kw):
+            raise Music.MusicError("音楽サービスに接続できません")
+
+    class Switch:
+        SwitchError = type("SwitchError", (Exception,), {})
+        music_busy = asyncio.Lock()
+
+        @staticmethod
+        async def for_music(cfg):
+            return []
+
+    class Hub:
+        music, gpu_switch = Music, Switch
+        _cat = staticmethod(lambda cfg, name: {})
+        _music_running = staticmethod(lambda: 0)
+
+        @staticmethod
+        async def free_vram_for_generation(cfg, cat, running):
+            return []
+    monkeypatch.setattr(chat_media, "_hub", lambda: Hub)
+    chat, _ = fake_chat([call("generate_music", prompt="x"), {"content": "ok"}])
+    monkeypatch.setattr(llm, "chat", chat)
+    evs = collect(chat_agent.run({}, "m", [{"role": "user", "content": "q"}], subdir="chat_m3"))
+    res = next(e["tool_result"] for e in evs if "tool_result" in e)
+    assert res["ok"] is False and "接続できません" in res["summary"]

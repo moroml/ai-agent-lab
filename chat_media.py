@@ -1,4 +1,4 @@
-"""チャットから画像・動画を作るツール (Local Gen Studio 経由)。
+"""チャットから画像・動画・音楽を作るツール (画像・動画は Local Gen Studio、音楽は ACE-Step)。
 
 結果は会話の作業フォルダ (Toolbox の root) へ保存し、相対パスを返す。画面はそのパスから
 プレビューとリンクを出す。LGS が止まっているときは、例外にせず日本語のエラー文字列を返す。
@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import shutil
 import time
 
 import httpx
@@ -45,6 +46,15 @@ SCHEMA = [
             "prompt": {"type": "string", "description": "動きを含む英語のプロンプト"},
             "image_path": {"type": "string", "description": "起点の画像(作業フォルダからの相対)。省略でテキストから"},
             "seconds": {"type": "number", "description": "長さ(秒)。既定2、上限5"}},
+            "required": ["prompt"]}}},
+    {"type": "function", "function": {
+        "name": "generate_music",
+        "description": "音楽(mp3)を生成して作業フォルダに保存する(ACE-Step。数分かかる)",
+        "parameters": {"type": "object", "properties": {
+            "prompt": {"type": "string", "description": "曲調・ジャンル・雰囲気の説明"},
+            "lyrics": {"type": "string", "description": "歌詞。省略可"},
+            "duration": {"type": "number", "description": "長さ(秒)。10〜600。省略で設定の既定"},
+            "instrumental": {"type": "boolean", "description": "true で歌なし"}},
             "required": ["prompt"]}}},
 ]
 NAMES = tuple(t["function"]["name"] for t in SCHEMA)
@@ -167,11 +177,31 @@ async def generate_video(cfg, box, prompt, image_path=None, seconds=None):
     return f"動画を作成しました: {rel}", [rel]
 
 
+async def generate_music(cfg, box, prompt, lyrics=None, duration=None, instrumental=False):
+    hub = _hub()
+    cat = hub._cat(cfg, "music")
+    async with hub.gpu_switch.music_busy:   # 生成中に画像側が ACE-Step を止めないように (/music/generate と同じ)
+        await _free_vram(cfg, "music")
+        try:
+            await hub.gpu_switch.for_music(cfg)
+            result = await hub.music.generate_music(
+                cfg, cat.get("model") or "music", str(prompt), lyrics=lyrics or None,
+                duration=float(duration) if duration else cat.get("duration"), instrumental=bool(instrumental))
+        except (hub.music.MusicError, hub.gpu_switch.SwitchError) as e:
+            raise MediaError(str(e)) from e
+    rel = f"music_{os.path.splitext(result['file'])[0][:8]}.mp3"
+    path = box._safe_path(rel)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    shutil.move(result["path"], path)   # 音楽画面の一覧には出さず、この会話の作業フォルダに置く
+    return f"音楽を作成しました: {rel}", [rel]
+
+
 async def call(cfg, box, name, args):
     """ツールを実行し (結果の文字列, 作業フォルダ内の作成ファイルの相対パス) を返す。"""
     if not isinstance(args, dict):
         return f"[引数エラー] {name}: 引数がオブジェクトでない", []
-    fn = {"generate_image": generate_image, "edit_image": edit_image, "generate_video": generate_video}[name]
+    fn = {"generate_image": generate_image, "edit_image": edit_image, "generate_video": generate_video,
+          "generate_music": generate_music}[name]
     try:
         return await fn(cfg, box, **args)
     except MediaError as e:
