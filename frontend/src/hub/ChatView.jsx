@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Brain, Check, Copy, EyeOff, FileText, Loader2, Menu, Paperclip, Plus, RotateCcw, Send, Square, Terminal, Trash2, Wrench, X } from "lucide-react";
 import Markdown from "../components/md.jsx";
+import { FileMedia, mediaKind } from "../components/FileMedia.jsx";
 import { modelName } from "../derive.js";
 import { ErrorNote, inputCls } from "./ui.jsx";
 import { AttachBar, DropZone, useAttach } from "../components/Attach.jsx";
@@ -201,12 +202,15 @@ function Message({ m, last, busy, onRegenerate, onApprove }) {
         </ul>
       )}
       {m.files?.length > 0 && (
-        <div className="flex flex-wrap gap-2">
-          {m.files.map((f) => (
-            <a key={f.path} href={f.url} target="_blank" rel="noreferrer" className="flex min-h-8 items-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-2.5 text-xs text-emerald-200 hover:bg-emerald-500/20">
-              <FileText size={13} aria-hidden="true" /> {f.path}
-            </a>
-          ))}
+        <div className="space-y-2">
+          {m.files.filter((f) => mediaKind(f.path)).map((f) => <FileMedia key={f.path} file={f} className="rounded-lg border border-slate-800" />)}
+          <div className="flex flex-wrap gap-2">
+            {m.files.map((f) => (
+              <a key={f.path} href={f.url} target="_blank" rel="noreferrer" className="flex min-h-8 items-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-2.5 text-xs text-emerald-200 hover:bg-emerald-500/20">
+                <FileText size={13} aria-hidden="true" /> {f.path}
+              </a>
+            ))}
+          </div>
         </div>
       )}
       {m.content ? <Markdown text={m.content} className="text-sm leading-relaxed text-slate-200" /> : streaming && <p className="soft-pulse text-sm text-slate-500">考え中…</p>}

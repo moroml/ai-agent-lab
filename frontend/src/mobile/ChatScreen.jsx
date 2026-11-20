@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Brain, Check, Copy, EyeOff, FileText, Menu, MessageSquare, RotateCcw, SendHorizontal, SlidersHorizontal, Square, SquarePen, Terminal, Trash2, Wrench, X } from "lucide-react";
 import Markdown from "../components/md.jsx";
+import { FileMedia, mediaKind } from "../components/FileMedia.jsx";
 import { modelName } from "../derive.js";
 import { TOOL_LABELS, useChat } from "../hub/useChat.js";
 import { Button, cx, Empty, Field, IconButton, inputCls, Notice, Sheet, Spinner, SwitchRow } from "./ui.jsx";
@@ -184,13 +185,16 @@ function Message({ m, last, busy, onRegenerate, onApprove }) {
         </ul>
       )}
       {m.files?.length > 0 && (
-        <div className="flex flex-wrap gap-2">
-          {m.files.map((f) => (
-            <a key={f.path} href={f.url} target="_blank" rel="noreferrer"
-               className="flex min-h-12 max-w-full items-center gap-2 rounded-xl border border-m-line-strong px-3 text-sm font-semibold text-m-primary">
-              <FileText size={18} aria-hidden="true" className="shrink-0" /> <span className="truncate">{f.path}</span>
-            </a>
-          ))}
+        <div className="space-y-2">
+          {m.files.filter((f) => mediaKind(f.path)).map((f) => <FileMedia key={f.path} file={f} className="rounded-xl border border-m-line" />)}
+          <div className="flex flex-wrap gap-2">
+            {m.files.map((f) => (
+              <a key={f.path} href={f.url} target="_blank" rel="noreferrer"
+                 className="flex min-h-12 max-w-full items-center gap-2 rounded-xl border border-m-line-strong px-3 text-sm font-semibold text-m-primary">
+                <FileText size={18} aria-hidden="true" className="shrink-0" /> <span className="truncate">{f.path}</span>
+              </a>
+            ))}
+          </div>
         </div>
       )}
       {m.content
