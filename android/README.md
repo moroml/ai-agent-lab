@@ -15,6 +15,8 @@ APK: `android/app/build/outputs/apk/debug/app-debug.apk`
 
 ## インストール
 
+スマホのブラウザで `https://<host>:8765/app.apk` を開く(ビルドした APK をサーバーが配る)。USB でつないでいるなら:
+
 ```powershell
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```

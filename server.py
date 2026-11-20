@@ -167,6 +167,15 @@ async def gpu() -> dict:
     return await llm.gpu_status()
 
 
+@app.get("/app.apk")
+async def android_app() -> FileResponse:
+    """スマホのブラウザから Android アプリを入れるための配布口 (android/ でビルドした APK)。"""
+    apk = Path(__file__).parent / "android" / "app" / "build" / "outputs" / "apk" / "debug" / "app-debug.apk"
+    if not apk.is_file():
+        raise HTTPException(404, "APK がまだありません (android/README.md の手順でビルドしてください)")
+    return FileResponse(apk, media_type="application/vnd.android.package-archive", filename="ai-agent-lab.apk")
+
+
 @app.get("/health")
 async def health() -> dict:
     from runs import MAX_CONCURRENT

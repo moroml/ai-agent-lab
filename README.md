@@ -61,6 +61,16 @@ Tailscale 以外から来た要求は、`/v1`（API キーで認証）と `/logi
 キーの発行と設定・モデルの導入・PC内のファイル添付は、このPCからしか行えない。中継された要求の接続元は
 `X-Forwarded-For` から実際の端末として扱われる（uvicorn は 127.0.0.1 からの中継だけを信頼する）。
 
+### スマホのアプリで使う（止まっていても起動できる）
+
+1. このPCで `.\install-launcher.ps1` を一度実行する。起動係（`launcher.py`、ポート 8766）がログオン時に常駐し、
+   tailnet の中だけに `https://<このPC>:8766` が出る（外すときは `.\install-launcher.ps1 -Remove`）
+2. `android/` で APK をビルドする（手順は `android/README.md`）
+3. スマホのブラウザで `https://<このPCのマシン名>.<tailnet名>.ts.net:8765/app.apk` を開いて入れる（USB なら `adb install -r`）
+
+アプリは画面をそのまま開き、サーバーが止まっていれば「ai-agent-lab を起動」のボタンを出す。
+PC の電源が入り、ログオン済みで、スマホの Tailscale がオンであることが前提。
+
 ### 別PCで ai-agent-lab を動かし、このPCの Ollama を使う
 
 GPU のあるPCの Ollama を Tailscale Serve で tailnet 内に出し、別PCの ai-agent-lab の接続先（`OLLAMA_BASE`）をそこへ向ける。
