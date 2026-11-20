@@ -462,8 +462,8 @@ def test_make_3d_bad_args_are_refused_before_asking(monkeypatch, workspace, args
 
 def test_run_command_does_not_see_secret_env(monkeypatch, workspace):
     monkeypatch.setenv("MY_API_KEY", "s3cret")
-    monkeypatch.setenv("PLAIN_VALUE", "visible")
-    cmd = "python -c \"import os;print(os.environ.get('MY_API_KEY'), os.environ.get('PLAIN_VALUE'))\""
+    monkeypatch.setenv("LC_ALL", "visible")
+    cmd = "python -c \"import os;print(os.environ.get('MY_API_KEY'), os.environ.get('LC_ALL'))\""
     evs, _ = run_commands(monkeypatch, [call("run_command", command=cmd), {"content": "ok"}], True)
     out = next(e["tool_result"] for e in evs if "tool_result" in e)["summary"]
     assert "None visible" in out and "s3cret" not in out
@@ -480,7 +480,7 @@ def test_make_3d_approval_shows_the_whole_script(monkeypatch, workspace):
 
 def test_safe_env_is_an_allowlist(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
-    monkeypatch.setenv("DATABASE_URL", "postgres://user:pw@host/db")   # 名前が秘密らしくなくても渡さない
+    monkeypatch.setenv("DATABASE_URL", "opaque-connection-string")   # 名前が秘密らしくなくても渡さない
     monkeypatch.setenv("LC_ALL", "C")
     env = chat_media.safe_env()
     assert "ANTHROPIC_API_KEY" not in env and "DATABASE_URL" not in env
