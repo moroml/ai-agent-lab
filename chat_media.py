@@ -147,8 +147,16 @@ async def _free_vram(cfg, category):
     await hub.free_vram_for_generation(cfg, hub._cat(cfg, category), hub._music_running())
 
 
+async def _cancel(job_id):
+    """LGS のジョブを止める (できなくてもよい)。"""
+    try:
+        await _lgs("POST", f"/api/jobs/{job_id}/cancel", timeout=5)
+    except MediaError:
+        pass
+
+
 async def _wait(job_id, limit):
-    """ジョブの完了を待って generation_id を返す。呼び出しが取り消されたら LGS のジョブも止める。"""
+    """ジョブの完了を待って generation_id を返す。時間切れや呼び出しの取り消しでは LGS のジョブも止める。"""
     end = time.monotonic() + limit
     try:
         while time.monotonic() < end:
@@ -161,12 +169,10 @@ async def _wait(job_id, limit):
                 raise MediaError(f"生成に失敗しました: {job.get('error') or job.get('progress_text') or '原因不明'}")
             await asyncio.sleep(POLL_SEC)
     except asyncio.CancelledError:
-        try:
-            await _lgs("POST", f"/api/jobs/{job_id}/cancel", timeout=5)
-        except MediaError:
-            pass
+        await _cancel(job_id)
         raise
-    raise MediaError(f"生成が {limit} 秒以内に終わりませんでした。Local Gen Studio の画面で状況を確認してください")
+    await _cancel(job_id)
+    raise MediaError(f"生成が {limit} 秒以内に終わりませんでした。止めました。もう一度頼むか、Local Gen Studio の画面で状況を確認してください")
 
 
 async def _save(box, gid, kind):

@@ -485,3 +485,22 @@ def test_safe_env_is_an_allowlist(monkeypatch):
     env = chat_media.safe_env()
     assert "ANTHROPIC_API_KEY" not in env and "DATABASE_URL" not in env
     assert "PATH" in {k.upper() for k in env} and env["LC_ALL"] == "C"
+
+
+def test_wait_timeout_cancels_the_lgs_job(monkeypatch, workspace):
+    st = FakeStudio(monkeypatch, status=("running",))
+    posted = []
+    inner = chat_media._lgs
+
+    async def lgs(method, path, **kw):
+        if method == "POST":
+            posted.append(path)
+            return None
+        return await inner(method, path, **kw)
+    monkeypatch.setattr(chat_media, "_lgs", lgs)
+    monkeypatch.setattr(chat_media, "IMAGE_WAIT", 0.05)
+    monkeypatch.setattr(chat_media, "POLL_SEC", 0.01)
+    evs, _ = media_run(monkeypatch, [call("generate_image", prompt="x"), {"content": "ok"}])
+    res = next(e["tool_result"] for e in evs if "tool_result" in e)
+    assert res["ok"] is False and "止めました" in res["summary"]
+    assert posted == ["/api/jobs/j1/cancel"]
