@@ -375,3 +375,86 @@ def test_generate_music_service_error_is_a_string(monkeypatch, workspace):
     evs = collect(chat_agent.run({}, "m", [{"role": "user", "content": "q"}], subdir="chat_m3"))
     res = next(e["tool_result"] for e in evs if "tool_result" in e)
     assert res["ok"] is False and "接続できません" in res["summary"]
+
+
+# ---- make_3d (Blender は差し替え。承認が要る) ----
+class FakeBlender:
+    """create_subprocess_exec の差し替え。成功なら引数の glb / png を作り、失敗なら Traceback を返す。"""
+
+    def __init__(self, monkeypatch, fail=False):
+        self.spawned, self.fail = [], fail
+        monkeypatch.setattr(chat_media, "BLENDER", __file__)
+        monkeypatch.setattr(chat_media.asyncio, "create_subprocess_exec", self.spawn)
+
+    async def spawn(self, *argv, **kw):
+        self.spawned.append((argv, kw))
+        fake = self
+
+        class Proc:
+            returncode = 0
+
+            async def communicate(self):
+                if fake.fail:
+                    self.returncode = 1
+                    return b"INFO lots of noise\nTraceback (most recent call last):\n  File x\nNameError: foo", None
+                glb, png = argv[-2:]
+                open(glb, "wb").write(b"glTF")
+                open(png, "wb").write(b"PNG")
+                return b"Blender quit", None
+        return Proc()
+
+
+def call_3d(args):   # call() は name= を取れないので直接組む
+    return {"tool_calls": [{"function": {"name": "make_3d", "arguments": args}}], "content": ""}
+
+
+def run_3d(monkeypatch, answer, **args):
+    return run_commands(monkeypatch, [call_3d(args), {"content": "ok"}], answer)
+
+
+def test_make_3d_needs_commands_and_is_hidden_otherwise(monkeypatch, workspace):
+    assert "make_3d" not in tool_names(chat_agent.schema())
+    assert "make_3d" in tool_names(chat_agent.schema(commands=True))
+    blender = FakeBlender(monkeypatch)
+    chat, _ = fake_chat([call_3d({"name": "a", "script": "import bpy"}), {"content": "ok"}])
+    monkeypatch.setattr(llm, "chat", chat)
+    evs = collect(chat_agent.run({}, "m", [{"role": "user", "content": "q"}], subdir="chat_d0"))
+    assert next(e["tool_result"] for e in evs if "tool_result" in e)["summary"].startswith("[不正ツール]")
+    assert not blender.spawned
+
+
+def test_make_3d_runs_after_approval_and_returns_previews(monkeypatch, workspace):
+    blender = FakeBlender(monkeypatch)
+    evs, _ = run_3d(monkeypatch, True, name="box", script="import bpy\nbpy.ops.mesh.primitive_cube_add()")
+    ap = next(e["approval"] for e in evs if "approval" in e)
+    assert "primitive_cube_add" in ap["command"]   # 承認画面にスクリプトが出る
+    work = workspace / "chat_c1"
+    py = (work / "box.py").read_text(encoding="utf-8")
+    assert "primitive_cube_add" in py and "export_scene.gltf" in py
+    argv, kw = blender.spawned[0]
+    assert "-b" in argv and kw["cwd"] == str(work)
+    assert [e["file"]["path"] for e in evs if "file" in e] == ["box.png", "box.glb"]
+
+
+def test_make_3d_denied_does_not_start_blender(monkeypatch, workspace):
+    blender = FakeBlender(monkeypatch)
+    evs, _ = run_3d(monkeypatch, False, name="box", script="import bpy")
+    assert next(e["tool_result"] for e in evs if "tool_result" in e)["ok"] is False
+    assert not blender.spawned and not any("file" in e for e in evs)
+
+
+def test_make_3d_script_error_goes_back_to_the_model(monkeypatch, workspace):
+    FakeBlender(monkeypatch, fail=True)
+    evs, _ = run_3d(monkeypatch, True, name="box", script="foo()")
+    res = next(e["tool_result"] for e in evs if "tool_result" in e)
+    assert res["ok"] is False and "NameError: foo" in res["summary"] and "noise" not in res["summary"]
+    assert not any("file" in e for e in evs)
+
+
+@pytest.mark.parametrize("args", [{"name": "../x", "script": "import bpy"}, {"name": "ok", "script": " "},
+                                  {"name": "ok", "script": "x" * 60000}])
+def test_make_3d_bad_args_are_refused_before_asking(monkeypatch, workspace, args):
+    blender = FakeBlender(monkeypatch)
+    evs, _ = run_3d(monkeypatch, True, **args)
+    assert not any("approval" in e for e in evs) and not blender.spawned
+    assert next(e["tool_result"] for e in evs if "tool_result" in e)["ok"] is False

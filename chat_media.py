@@ -1,4 +1,4 @@
-"""チャットから画像・動画・音楽を作るツール (画像・動画は Local Gen Studio、音楽は ACE-Step)。
+"""チャットから画像・動画・音楽・3D を作るツール (画像・動画は Local Gen Studio、音楽は ACE-Step、3D は Blender)。
 
 結果は会話の作業フォルダ (Toolbox の root) へ保存し、相対パスを返す。画面はそのパスから
 プレビューとリンクを出す。LGS が止まっているときは、例外にせず日本語のエラー文字列を返す。
@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import shutil
 import time
 
@@ -20,6 +21,11 @@ IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp")
 FILE_EXT = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp",
             "video/mp4": ".mp4", "video/webm": ".webm"}
 VIDEO_FPS = 24
+BLENDER = os.environ.get("BLENDER_EXE") or "C:/Program Files/Blender Foundation/Blender 5.2/blender.exe"
+BLENDER_WAIT = 180   # Blender を待つ上限秒
+SCRIPT_MAX = 50000
+NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
+_SECRET_ENV = re.compile(r"(KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTH)", re.I)
 
 SCHEMA = [
     {"type": "function", "function": {
@@ -58,6 +64,47 @@ SCHEMA = [
             "required": ["prompt"]}}},
 ]
 NAMES = tuple(t["function"]["name"] for t in SCHEMA)
+
+# make_3d はモデルが書いた Python をそのまま実行する (コマンド実行と同じ重さ) ので、NAMES には入れず、
+# commands=True のときだけ載せて実行前の承認を求める (chat_agent)
+SCHEMA_3D = {"type": "function", "function": {
+    "name": "make_3d",
+    "description": "Blender (bpy 5.x) の Python スクリプトで3Dモデルを作り、name.glb と、見た目の確認用の name.png を"
+                   "作業フォルダに保存する(実行前にユーザーの承認が要る)。script は空のシーンにメッシュとマテリアルを作る部分だけ"
+                   "を書く(カメラ・ライト・書き出し・レンダーは自動)。失敗するとエラー全文が返るので、直して再実行できる",
+    "parameters": {"type": "object", "properties": {
+        "name": {"type": "string", "description": "ファイル名の元(英数字・_・-、40字まで)"},
+        "script": {"type": "string", "description": "bpy のスクリプト。import bpy から書く"}},
+        "required": ["name", "script"]}}}
+
+# 空のシーンから始め、書き出しと確認用のレンダーを後ろに足す (書き出しを先にして、レンダーが落ちても glb は残す)
+RUNNER_HEAD = "import bpy\nbpy.ops.wm.read_factory_settings(use_empty=True)\n"
+RUNNER_TAIL = """
+import sys
+import mathutils
+_glb, _png = sys.argv[sys.argv.index("--") + 1:][:2]
+_scene = bpy.context.scene
+_meshes = [o for o in _scene.objects if o.type == "MESH"]
+if not _meshes:
+    raise RuntimeError("メッシュがありません。スクリプトで形を作ること")
+bpy.ops.export_scene.gltf(filepath=_glb, export_format="GLB")
+_pts = [o.matrix_world @ mathutils.Vector(c) for o in _meshes for c in o.bound_box]
+_lo = mathutils.Vector([min(p[i] for p in _pts) for i in range(3)])
+_hi = mathutils.Vector([max(p[i] for p in _pts) for i in range(3)])
+_mid, _r = (_lo + _hi) / 2, max((_hi - _lo).length / 2, 0.1)
+_cam = bpy.data.objects.new("cam", bpy.data.cameras.new("cam"))
+_scene.collection.objects.link(_cam)
+_cam.location = _mid + mathutils.Vector((1.6, -2.2, 1.2)).normalized() * _r * 3.2
+_cam.rotation_euler = (_mid - _cam.location).to_track_quat("-Z", "Y").to_euler()
+_scene.camera = _cam
+_sun = bpy.data.objects.new("sun", bpy.data.lights.new("sun", "SUN"))
+_sun.rotation_euler = (0.9, 0.2, 0.6)
+_scene.collection.objects.link(_sun)
+_scene.render.engine = "BLENDER_EEVEE"
+_scene.render.resolution_x = _scene.render.resolution_y = 768
+_scene.render.filepath = _png
+bpy.ops.render.render(write_still=True)
+"""
 
 
 class MediaError(Exception):
@@ -196,12 +243,57 @@ async def generate_music(cfg, box, prompt, lyrics=None, duration=None, instrumen
     return f"音楽を作成しました: {rel}", [rel]
 
 
+def safe_env():
+    """子プロセスへ渡す環境変数。キー・トークン類は除く。"""
+    return {k: v for k, v in os.environ.items() if not _SECRET_ENV.search(k)}
+
+
+def check_3d(args):
+    """make_3d の引数の検査。問題があれば理由を返す (承認を求める前に弾く)。"""
+    name, script = args.get("name"), args.get("script")
+    if not isinstance(name, str) or not NAME_RE.match(name):
+        return "[引数エラー] make_3d: name は英数字・_・- の40字以内"
+    if not isinstance(script, str) or not script.strip() or len(script) > SCRIPT_MAX:
+        return f"[引数エラー] make_3d: script が空か、{SCRIPT_MAX}字を超えている"
+    return None
+
+
+async def make_3d(cfg, box, name, script):
+    if not os.path.isfile(BLENDER):
+        raise MediaError(f"Blender が見つかりません: {BLENDER} (環境変数 BLENDER_EXE で場所を指定できます)")
+    py = box._safe_path(f"{name}.py")
+    os.makedirs(os.path.dirname(py), exist_ok=True)
+    with open(py, "w", encoding="utf-8") as f:
+        f.write(RUNNER_HEAD + script + "\n" + RUNNER_TAIL)
+    glb, png = box._safe_path(f"{name}.glb"), box._safe_path(f"{name}.png")
+    for old in (glb, png):   # 前の試行の残りを成功と取り違えない
+        if os.path.exists(old):
+            os.unlink(old)
+    proc = await asyncio.create_subprocess_exec(
+        BLENDER, "-b", "--factory-startup", "--python-exit-code", "1", "--python", py, "--", glb, png,
+        cwd=box.root, env=safe_env(), stdin=asyncio.subprocess.DEVNULL,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+    try:
+        out, _ = await asyncio.wait_for(proc.communicate(), BLENDER_WAIT)
+    except asyncio.TimeoutError:
+        raise MediaError(f"Blender が {BLENDER_WAIT} 秒以内に終わりませんでした。形を単純にして再実行してください") from None
+    finally:
+        if proc.returncode is None:
+            proc.kill()
+            await proc.wait()
+    text = out.decode("utf-8", errors="replace")
+    if proc.returncode != 0 or not (os.path.isfile(glb) and os.path.isfile(png)):
+        tail = text[text.rfind("Traceback"):] if "Traceback" in text else text
+        raise MediaError(f"Blender のスクリプトが失敗しました (exit={proc.returncode}):\n{tail[-2500:]}")
+    return f"3Dモデルを作成しました: {name}.glb (確認用の画像 {name}.png)。スクリプトは {name}.py", [f"{name}.png", f"{name}.glb"]
+
+
 async def call(cfg, box, name, args):
     """ツールを実行し (結果の文字列, 作業フォルダ内の作成ファイルの相対パス) を返す。"""
     if not isinstance(args, dict):
         return f"[引数エラー] {name}: 引数がオブジェクトでない", []
     fn = {"generate_image": generate_image, "edit_image": edit_image, "generate_video": generate_video,
-          "generate_music": generate_music}[name]
+          "generate_music": generate_music, "make_3d": make_3d}[name]
     try:
         return await fn(cfg, box, **args)
     except MediaError as e:
