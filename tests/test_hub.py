@@ -54,7 +54,8 @@ def test_move_file_notes_takes_marker_out_of_answers():
     msgs = [{"role": "user", "content": "画像を作って"},
             {"role": "assistant", "content": "作りました。\n\n[作成したファイル: a.png, b.png]"},
             {"role": "user", "content": "次は音楽"},
-            {"role": "assistant", "content": "編集しました。\n\n[作成したファイル: b.png, c[1].png]"},
+            # モデルが真似て書いた印と、画面が付けた印が重なっている
+            {"role": "assistant", "content": "編集しました。\n\n[作成したファイル: b.png]\n\n[作成したファイル: b.png, c[1].png]"},
             {"role": "user", "content": "BGM を作って"}]
     out = hub.move_file_notes(msgs)
     assert [m["content"] for m in out[1::2]] == ["作りました。", "編集しました。"]

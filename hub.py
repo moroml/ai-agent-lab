@@ -312,18 +312,20 @@ def trim_history(messages: list[dict], budget_chars: int) -> list[dict]:
     return list(reversed(kept))
 
 
-FILE_NOTE = re.compile(r"\s*\[作成したファイル: ([^\n]*)\]\s*$")   # 名前に ] があっても末尾の ] まで取る
+FILE_NOTE = re.compile(r"^[ \t]*\[作成したファイル: ([^\n]*)\][ \t]*$", re.M)   # 名前に ] があっても行末の ] まで取る
 
 
 def move_file_notes(messages: list[dict]) -> list[dict]:
-    """画面が回答の末尾に付ける [作成したファイル: ...] を外し、最新の依頼の前置きにまとめる。
-    回答の中に残すと、モデルがツールを呼ばずにこの印だけ真似て「作った」と答える (2026-11-20 実機)。"""
+    """回答の中の [作成したファイル: ...] の行 (画面が付けたものも、モデルが真似て書いたものも) を外し、
+    最新の依頼の前置きにまとめる。回答に残すと、モデルがツールを呼ばずにこの印だけ真似て「作った」と答える
+    (2026-11-20 実機)。"""
     files = []
     for m in messages:
-        hit = m["role"] == "assistant" and FILE_NOTE.search(m.get("content") or "")
-        if hit:
-            files += [f.strip() for f in hit.group(1).split(",") if f.strip()]
-            m["content"] = m["content"][:hit.start()]
+        if m["role"] != "assistant" or not FILE_NOTE.search(m.get("content") or ""):
+            continue
+        for names in FILE_NOTE.findall(m["content"]):
+            files += [f.strip() for f in names.split(",") if f.strip()]
+        m["content"] = FILE_NOTE.sub("", m["content"]).strip()
     if files:
         last = messages[-1]
         last["content"] = f"(作業フォルダにある、これまでに作ったファイル: {', '.join(dict.fromkeys(files))})\n\n{last['content']}"
