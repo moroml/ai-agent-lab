@@ -180,6 +180,7 @@ class MainActivity : AppCompatActivity() {
                         val s = httpCall("https://$host:8766/status")
                         if (s.code >= 400) error = s.detail ?: "HTTP ${s.code}"
                         else if (s.json?.optBoolean("running") == true) break
+                        else if (s.json?.optBoolean("starting") == false) s.detail?.let { error = it } // PC側で起動に失敗した
                     } catch (e: IOException) { /* 一時的な失敗は期限まで待つ */ }
                 }
             } catch (e: IOException) {
