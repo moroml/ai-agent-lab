@@ -1,7 +1,7 @@
 // スマホ版のチャット。状態と送受信は hub/useChat.js (PC版と共用・会話も同じ保存先)。
 // スマホのキーボードでは Enter は改行にし、送信は右下のボタンで行う。
 import { useEffect, useRef, useState } from "react";
-import { Brain, Check, Copy, EyeOff, FileText, Menu, MessageSquare, RotateCcw, SendHorizontal, SlidersHorizontal, Square, SquarePen, Trash2, Wrench, X } from "lucide-react";
+import { Brain, Check, Copy, EyeOff, FileText, Menu, MessageSquare, RotateCcw, SendHorizontal, SlidersHorizontal, Square, SquarePen, Terminal, Trash2, Wrench, X } from "lucide-react";
 import Markdown from "../components/md.jsx";
 import { modelName } from "../derive.js";
 import { TOOL_LABELS, useChat } from "../hub/useChat.js";
@@ -53,7 +53,7 @@ export default function ChatScreen() {
         ) : (
           <div className="space-y-6">
             {conv.messages.map((m, i) => (
-              <Message key={i} m={m} last={i === conv.messages.length - 1} busy={busy} onRegenerate={chat.regenerate} />
+              <Message key={i} m={m} last={i === conv.messages.length - 1} busy={busy} onRegenerate={chat.regenerate} onApprove={chat.answerApproval} />
             ))}
           </div>
         )}
@@ -128,6 +128,9 @@ export default function ChatScreen() {
         </Field>
         <div className="mt-4 divide-y divide-m-line">
           <SwitchRow icon={Wrench} label="ツールを使う" hint="ファイルの作成・Web検索・ページの取得を実際に行う" checked={tools} onChange={chat.setTools} />
+          <SwitchRow icon={Terminal} label="コマンド実行" disabled={!tools || !chat.canCommands}
+                     hint={chat.canCommands ? "作業フォルダ内で実行。実行のたびにここで承認する" : "このPCの画面からだけ使えます"}
+                     checked={tools && chat.commands && chat.canCommands} onChange={chat.setCommands} />
           <SwitchRow icon={Brain} label="考えてから答える" hint="遅くなるが、難しい質問に強い" checked={think} onChange={chat.setThink} />
           <SwitchRow icon={EyeOff} label="シークレット" hint="会話を保存せず、終えるときに作成ファイルごと消す" checked={!!secret}
                      onChange={(on) => { stick.current = true; chat.resetSecret(on); }} />
@@ -137,7 +140,7 @@ export default function ChatScreen() {
   );
 }
 
-function Message({ m, last, busy, onRegenerate }) {
+function Message({ m, last, busy, onRegenerate, onApprove }) {
   if (m.role === "user") {
     return (
       <div className="flex justify-end">
@@ -158,12 +161,24 @@ function Message({ m, last, busy, onRegenerate }) {
       {m.steps?.length > 0 && (
         <ul className="space-y-1 rounded-xl bg-m-sunken px-3 py-2 text-sm text-m-muted">
           {m.steps.map((s) => (
-            <li key={s.id} className="flex items-center gap-2">
-              {!s.done ? (streaming ? <Spinner size={14} /> : <X size={14} aria-hidden="true" className="shrink-0 text-m-subtle" />)
-                : s.ok ? <Check size={14} aria-hidden="true" className="shrink-0 text-m-primary" />
-                  : <X size={14} aria-hidden="true" className="shrink-0 text-m-danger" />}
-              <span className="shrink-0 text-m-fg">{TOOL_LABELS[s.name] ?? s.name}</span>
-              <span className="min-w-0 truncate">{s.done && !s.ok ? s.summary : s.label}</span>
+            <li key={s.id}>
+              <div className="flex items-center gap-2">
+                {!s.done ? (streaming ? <Spinner size={14} /> : <X size={14} aria-hidden="true" className="shrink-0 text-m-subtle" />)
+                  : s.ok ? <Check size={14} aria-hidden="true" className="shrink-0 text-m-primary" />
+                    : <X size={14} aria-hidden="true" className="shrink-0 text-m-danger" />}
+                <span className="shrink-0 text-m-fg">{TOOL_LABELS[s.name] ?? s.name}</span>
+                <span className="min-w-0 truncate">{s.done && !s.ok ? s.summary : s.label}</span>
+              </div>
+              {s.approval && streaming && (
+                <div role="group" aria-label="コマンドの承認" className="mt-2 space-y-2 rounded-xl border border-m-warning bg-m-warning-soft p-3 text-m-fg">
+                  <p>このコマンドを実行しますか？（作業フォルダ: {s.approval.working_dir}）</p>
+                  <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-m-sunken p-2 text-sm">{s.approval.command}</pre>
+                  <div className="flex gap-2">
+                    <Button variant="primary" className="flex-1" onClick={() => onApprove(s.approval.id, true)}>実行</Button>
+                    <Button className="flex-1" onClick={() => onApprove(s.approval.id, false)}>拒否</Button>
+                  </div>
+                </div>
+              )}
             </li>
           ))}
         </ul>

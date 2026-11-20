@@ -23,6 +23,8 @@ export const prewarmChat = (model) => post("/hub/prewarm", { model });
 export const discardChat = (conv, batch) =>
   fetch(`/hub/chat/${conv}${batch ? `?batch=${batch}` : ""}`, { method: "DELETE", keepalive: true }).catch(() => {});
 
+export const answerChatApproval = (aid, approve) => post(`/hub/chat/approvals/${aid}`, { approve });
+
 // チャット: SSE を fetch で読み、イベントごとに onEvent を呼ぶ
 export async function streamChat(body, onEvent, signal) {
   const resp = await fetch("/hub/chat", {

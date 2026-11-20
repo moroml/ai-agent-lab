@@ -1,6 +1,6 @@
 // チャット: Run を作らない会話専用の画面。状態と送受信は useChat.js (スマホ版と共用)。
 import { useEffect, useRef, useState } from "react";
-import { Brain, Check, Copy, EyeOff, FileText, Loader2, Menu, Paperclip, Plus, RotateCcw, Send, Square, Trash2, Wrench, X } from "lucide-react";
+import { Brain, Check, Copy, EyeOff, FileText, Loader2, Menu, Paperclip, Plus, RotateCcw, Send, Square, Terminal, Trash2, Wrench, X } from "lucide-react";
 import Markdown from "../components/md.jsx";
 import { modelName } from "../derive.js";
 import { ErrorNote, inputCls } from "./ui.jsx";
@@ -10,7 +10,7 @@ import { TOOL_LABELS, useChat } from "./useChat.js";
 export default function ChatView() {
   const att = useAttach();
   const chat = useChat(att);
-  const { conv, sorted, currentId, secret, armed, remove, catalog, chatGroups, model, setModel, think, setThink, tools, setTools,
+  const { conv, sorted, currentId, secret, armed, remove, catalog, chatGroups, model, setModel, think, setThink, tools, setTools, commands, setCommands, canCommands, answerApproval,
           input, setInput, busy, error, setError, submit, regenerate } = chat;
   const [listOpen, setListOpen] = useState(false);
   const endRef = useRef(null);
@@ -83,6 +83,16 @@ export default function ChatView() {
           </button>
           <button
             type="button"
+            onClick={() => setCommands((v) => !v)}
+            aria-pressed={tools && commands && canCommands}
+            disabled={!tools || !canCommands}
+            className={`flex min-h-10 items-center gap-1 rounded-lg border px-2.5 text-xs disabled:opacity-40 ${tools && commands && canCommands ? "border-amber-500/40 bg-amber-500/10 text-amber-200" : "border-slate-700 text-slate-400"}`}
+            title={canCommands ? "オンで作業フォルダ内のコマンド実行を許す（実行のたびにここで承認）" : "コマンド実行はこのPCの画面からだけ使えます"}
+          >
+            <Terminal size={14} aria-hidden="true" /> コマンド{tools && commands && canCommands ? "あり" : "なし"}
+          </button>
+          <button
+            type="button"
             onClick={() => setThink((v) => !v)}
             aria-pressed={think}
             className={`flex min-h-10 items-center gap-1 rounded-lg border px-2.5 text-xs ${think ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200" : "border-slate-700 text-slate-400"}`}
@@ -101,7 +111,7 @@ export default function ChatView() {
               </div>
             )}
             {conv?.messages.map((m, i) => (
-              <Message key={i} m={m} last={i === conv.messages.length - 1} busy={busy} onRegenerate={regenerate} />
+              <Message key={i} m={m} last={i === conv.messages.length - 1} busy={busy} onRegenerate={regenerate} onApprove={answerApproval} />
             ))}
             <div ref={endRef} />
           </div>
@@ -139,7 +149,7 @@ export default function ChatView() {
   );
 }
 
-function Message({ m, last, busy, onRegenerate }) {
+function Message({ m, last, busy, onRegenerate, onApprove }) {
   if (m.role === "user") {
     return (
       <div className="flex justify-end">
@@ -168,12 +178,24 @@ function Message({ m, last, busy, onRegenerate }) {
       {m.steps?.length > 0 && (
         <ul className="space-y-1 rounded-lg border border-slate-800 bg-slate-900/50 px-3 py-2 text-xs text-slate-400">
           {m.steps.map((s) => (
-            <li key={s.id} className="flex items-center gap-2" title={s.summary}>
-              {!s.done ? <Loader2 size={12} className={streaming ? "animate-spin" : ""} aria-hidden="true" />
-                : s.ok ? <Check size={12} className="text-emerald-400" aria-hidden="true" />
-                  : <X size={12} className="text-red-400" aria-hidden="true" />}
-              <span className="shrink-0 text-slate-300">{TOOL_LABELS[s.name] ?? s.name}</span>
-              <span className="truncate">{s.done && !s.ok ? s.summary : s.label}</span>
+            <li key={s.id} title={s.summary}>
+              <div className="flex items-center gap-2">
+                {!s.done ? <Loader2 size={12} className={streaming ? "animate-spin" : ""} aria-hidden="true" />
+                  : s.ok ? <Check size={12} className="text-emerald-400" aria-hidden="true" />
+                    : <X size={12} className="text-red-400" aria-hidden="true" />}
+                <span className="shrink-0 text-slate-300">{TOOL_LABELS[s.name] ?? s.name}</span>
+                <span className="truncate">{s.done && !s.ok ? s.summary : s.label}</span>
+              </div>
+              {s.approval && streaming && (
+                <div role="group" aria-label="コマンドの承認" className="mt-1.5 space-y-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2.5">
+                  <p className="text-amber-200">このコマンドを実行しますか？（作業フォルダ: {s.approval.working_dir}）</p>
+                  <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded bg-slate-950 p-2 text-slate-200">{s.approval.command}</pre>
+                  <div className="flex gap-2">
+                    <button type="button" onClick={() => onApprove(s.approval.id, true)} className="min-h-9 rounded-lg bg-emerald-600 px-3 text-white hover:bg-emerald-500">実行</button>
+                    <button type="button" onClick={() => onApprove(s.approval.id, false)} className="min-h-9 rounded-lg border border-slate-600 px-3 text-slate-200 hover:bg-slate-800">拒否</button>
+                  </div>
+                </div>
+              )}
             </li>
           ))}
         </ul>

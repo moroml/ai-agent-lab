@@ -4,12 +4,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { backendMeta } from "../derive.js";
 import { withAttach } from "../components/Attach.jsx";
-import { discardChat, fetchCategories, prewarmChat, streamChat } from "./api.js";
+import { answerChatApproval, discardChat, fetchCategories, prewarmChat, streamChat } from "./api.js";
 import { usePersisted } from "./ui.jsx";
 
 export const TOOL_LABELS = {
   web_search: "Web検索", fetch_url: "ページ取得", write_file: "ファイル作成", edit_file: "ファイル編集",
-  read_file: "ファイル読込", list_dir: "一覧", search_files: "ファイル内検索",
+  read_file: "ファイル読込", list_dir: "一覧", search_files: "ファイル内検索", run_command: "コマンド実行",
 };
 
 // 次の発言で続きの作業ができるよう、作ったファイル名を履歴の本文に添える(中身は送らない)。
@@ -30,6 +30,7 @@ export function useChat(att = null) {
   const [model, setModel] = usePersisted("hub.chat.model", "auto");
   const [think, setThink] = usePersisted("hub.chat.think", false);
   const [tools, setTools] = usePersisted("hub.chat.tools", true);
+  const [commands, setCommands] = usePersisted("hub.chat.commands", false);   // コマンド実行(実行のたびに画面で承認)。このPCの画面だけ
   const [secret, setSecret] = useState(null);   // シークレット中の会話。一覧にも localStorage にも入れない
   const [catalog, setCatalog] = useState(null);
   const [input, setInput] = useState("");
@@ -39,6 +40,7 @@ export function useChat(att = null) {
 
   useEffect(() => { fetchCategories().then(setCatalog).catch((e) => setError(e.message)); }, []);
   useEffect(() => { prewarmChat(model).catch(() => { /* 先読み失敗は送信時に改めて表示される */ }); }, [model]);
+  const canCommands = catalog?.can_commands === true;
   const conv = secret ?? convs.find((c) => c.id === currentId) ?? null;
   const sorted = useMemo(() => [...convs].sort((a, b) => b.updated - a.updated), [convs]);
   // 選択肢は接続先ごとにまとめる
@@ -106,7 +108,7 @@ export function useChat(att = null) {
     });
     try {
       await streamChat(
-        { messages: history.map(forModel), model, think, tools, conv: id, attach: history.at(-1)?.attach?.batch ?? null },
+        { messages: history.map(forModel), model, think, tools, commands: tools && commands && canCommands, conv: id, attach: history.at(-1)?.attach?.batch ?? null },
         (ev) => {
           if (ev.error) throw new Error(ev.error);
           // 回答が拒否で、無検閲モデルが答え直す: 書きかけの拒否文を消して受け直す
@@ -115,7 +117,8 @@ export function useChat(att = null) {
           if (ev.thinking) update((m) => ({ ...m, thinking: m.thinking + ev.thinking }));
           if (ev.content) update((m) => ({ ...m, content: m.content + ev.content }));
           if (ev.tool) update((m) => ({ ...m, steps: [...(m.steps ?? []), ev.tool] }));
-          if (ev.tool_result) update((m) => ({ ...m, steps: m.steps.map((s) => (s.id === ev.tool_result.id ? { ...s, ...ev.tool_result, done: true } : s)) }));
+          if (ev.approval) update((m) => ({ ...m, steps: m.steps.map((s) => (s.id === ev.approval.call ? { ...s, approval: ev.approval } : s)) }));
+          if (ev.tool_result) update((m) => ({ ...m, steps: m.steps.map((s) => (s.id === ev.tool_result.id ? { ...s, ...ev.tool_result, done: true, approval: undefined } : s)) }));
           if (ev.file) update((m) => ({ ...m, files: [...(m.files ?? []).filter((f) => f.path !== ev.file.path), ev.file] }));
           if (ev.done) update((m) => ({ ...m, meta: ev.meta }));
         },
@@ -146,6 +149,8 @@ export function useChat(att = null) {
     if (lastUser >= 0) send(ms.slice(0, lastUser + 1));
   }
 
+  // 承認待ちのコマンドへの 実行 / 拒否。結果は SSE の tool_result で届き、そこで承認欄が消える
+  const answerApproval = (aid, approve) => answerChatApproval(aid, approve).catch((e) => setError(e.message));
   const stop = () => abortRef.current?.abort();
   const select = (id) => setCurrentId(id);
   const startNew = () => { if (secret) return resetSecret(true); setCurrentId(null); setError(""); };
@@ -167,6 +172,7 @@ export function useChat(att = null) {
     conv, sorted, currentId, select, startNew, remove, armed,
     secret, resetSecret,
     catalog, chatGroups, model, setModel, think, setThink, tools, setTools,
+    commands, setCommands, canCommands, answerApproval,
     input, setInput, busy, error, setError, submit, regenerate, stop,
   };
 }
