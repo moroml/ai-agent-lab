@@ -312,6 +312,24 @@ def trim_history(messages: list[dict], budget_chars: int) -> list[dict]:
     return list(reversed(kept))
 
 
+FILE_NOTE = re.compile(r"\s*\[作成したファイル: ([^\n]*)\]\s*$")   # 名前に ] があっても末尾の ] まで取る
+
+
+def move_file_notes(messages: list[dict]) -> list[dict]:
+    """画面が回答の末尾に付ける [作成したファイル: ...] を外し、最新の依頼の前置きにまとめる。
+    回答の中に残すと、モデルがツールを呼ばずにこの印だけ真似て「作った」と答える (2026-11-20 実機)。"""
+    files = []
+    for m in messages:
+        hit = m["role"] == "assistant" and FILE_NOTE.search(m.get("content") or "")
+        if hit:
+            files += [f.strip() for f in hit.group(1).split(",") if f.strip()]
+            m["content"] = m["content"][:hit.start()]
+    if files:
+        last = messages[-1]
+        last["content"] = f"(作業フォルダにある、これまでに作ったファイル: {', '.join(dict.fromkeys(files))})\n\n{last['content']}"
+    return messages
+
+
 async def pick_chat_model(cfg: dict, requested: str | None, cat: dict) -> str:
     """明示指定ならそのモデルだけ。auto なら種類の既定 → fallback → default の順で使えるもの。"""
     installed = set(await llm.list_models())
@@ -361,7 +379,7 @@ async def hub_chat(req: ChatReq, request: Request) -> StreamingResponse:
     msgs = [m.model_dump() for m in req.messages if m.role in ("user", "assistant")]
     if not msgs or msgs[-1]["role"] != "user":
         raise HTTPException(400, "最後の発言は user にしてください")
-    msgs = trim_history(msgs, int(cat.get("history_chars", 24000)))
+    msgs = move_file_notes(trim_history(msgs, int(cat.get("history_chars", 24000))))
     system = req.system if req.system is not None else cat.get("system")
     if system:
         msgs.insert(0, {"role": "system", "content": system})
