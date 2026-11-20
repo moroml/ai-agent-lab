@@ -1,0 +1,29 @@
+plugins {
+    id 'com.android.application'
+}
+
+// local.properties の aal.host を既定のPCアドレスにする(未設定なら空)
+def localProps = new Properties()
+def localFile = rootProject.file('local.properties')
+if (localFile.exists()) localFile.withInputStream { localProps.load(it) }
+
+android {
+    namespace = 'lab.aiagent.app'
+    compileSdk = 36
+    defaultConfig {
+        applicationId = 'lab.aiagent.app'
+        minSdk = 26
+        targetSdk = 36
+        versionCode = 1
+        versionName = '1.0'
+        buildConfigField 'String', 'DEFAULT_HOST', "\"${localProps.getProperty('aal.host', '').trim()}\""
+    }
+    buildFeatures {
+        buildConfig = true
+    }
+}
+
+dependencies {
+    implementation 'androidx.appcompat:appcompat:1.7.1'
+    implementation 'androidx.core:core-ktx:1.17.0'
+}
