@@ -45,10 +45,7 @@ POLL_S = 0.25
 LOOPBACK = ("127.0.0.1", "::1", "localhost")
 COOKIE = "aal_session"
 COOKIE_DAYS = 30
-PAIR_TTL_S = 300
 LOGIN_FAIL_DELAY_S = 1   # 総当たりを遅くする
-PAIR_TRIES = 5   # 6桁を総当たりされないよう、この回数まちがえたら接続コードを無効にする
-_pair = {"code": "", "expires": 0.0, "tries": 0}
 
 
 def _settings() -> dict:
@@ -133,25 +130,10 @@ def has_session(request: Request) -> bool:
     return bool(token) and hmac.compare_digest((request.cookies.get(COOKIE) or "").encode(), token.encode())
 
 
-def new_pair_code() -> str:
-    _pair.update(code=f"{secrets.randbelow(10**6):06d}", expires=time.monotonic() + PAIR_TTL_S, tries=0)
-    return _pair["code"]
-
-
 def redeem(secret: str) -> bool:
-    """共通キーか有効な接続コードなら True。接続コードは1回使うか PAIR_TRIES 回まちがえると無効になる。"""
+    """共通キーなら True。"""
     key = api_key()
-    if not key:
-        return False
-    if hmac.compare_digest(secret.encode(), key.encode()):
-        return True
-    if not _pair["code"] or time.monotonic() > _pair["expires"]:
-        return False
-    ok = hmac.compare_digest(secret.encode(), _pair["code"].encode())
-    _pair["tries"] += 1
-    if ok or _pair["tries"] >= PAIR_TRIES:
-        _pair["code"] = ""
-    return ok
+    return bool(key) and hmac.compare_digest(secret.encode(), key.encode())
 
 
 LOGIN_PAGE = """<!doctype html>
@@ -168,9 +150,9 @@ button{border:0;background:#059669;color:#fff;font-weight:600}button:disabled{op
 </style></head><body>
 <form id="f">
 <h1>ai-agent-lab に接続</h1>
-<p>ai-agent-lab を動かしているPCの画面「接続状態」で接続コードを出し、ここに入力します。共通キーでも入れます。</p>
-<label for="s" hidden>接続コードまたは共通キー</label>
-<input id="s" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="接続コード（6桁）または共通キー" required>
+<p>ai-agent-lab を動かしているPCの画面「接続状態」で発行した共通キーを入力します。</p>
+<label for="s" hidden>共通キー</label>
+<input id="s" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="共通キー" required>
 <button id="b">接続</button>
 <p id="err" role="alert"></p>
 </form>
@@ -211,7 +193,7 @@ async def remote_guard(request: Request, call_next):
         return await call_next(request)
     if path == "/" and request.method == "GET":
         return HTMLResponse(LOGIN_PAGE, status_code=401, headers={"Cache-Control": "no-store"})
-    return JSONResponse({"detail": "ログインが必要です (画面を開き直して接続コードを入力してください)"}, status_code=401)
+    return JSONResponse({"detail": "ログインが必要です (画面を開き直して共通キーを入力してください)"}, status_code=401)
 
 
 class LoginReq(BaseModel):
@@ -368,18 +350,11 @@ def register(app) -> None:
             raise HTTPException(404, f"モデル '{model}' のキーはありません")
         return {"ok": True}
 
-    @app.post("/login/code")
-    async def login_code(request: Request):
-        _require_local(request)
-        if not api_key():
-            raise HTTPException(409, "先に共通キーを発行してください")
-        return {"code": new_pair_code(), "ttl": PAIR_TTL_S}
-
     @app.post("/login")
     async def login(req: LoginReq, request: Request):
         if not redeem(req.secret.strip()):
             await asyncio.sleep(LOGIN_FAIL_DELAY_S)
-            raise HTTPException(401, "接続コードかキーが違います (接続コードは5分・1回きりです)")
+            raise HTTPException(401, "キーが違います")
         resp = JSONResponse({"ok": True})
         resp.set_cookie(COOKIE, session_token(), max_age=COOKIE_DAYS * 86400, httponly=True,
                         samesite="strict", secure=request.url.scheme == "https")

@@ -1,5 +1,5 @@
 // スマホ版のエンジン操作。下のシート (タイトルと閉じるはシート側) の中身だけを描く。
-// サービス・VRAM・モデル・推論エンジンを1か所で、自分で起動・停止する。モデルの導入・API キー・接続コードは PC だけの操作なので出さない。
+// サービス・VRAM・モデル・推論エンジンを1か所で、自分で起動・停止する。モデルの導入・API キーは PC だけの操作なので出さない。
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Eraser, Play, Power, RotateCw, Square } from "lucide-react";
 import {

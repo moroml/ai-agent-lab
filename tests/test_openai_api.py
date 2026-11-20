@@ -227,7 +227,7 @@ def test_remote_guard_requires_login_or_common_key(monkeypatch):
     app, client = _remote_app(monkeypatch)
     remote = client("100.64.0.9")
     assert remote.get("/runs").status_code == 401
-    assert "接続コード" in remote.get("/").text and remote.get("/").status_code == 401   # 画面の入口はログイン画面
+    assert "共通キー" in remote.get("/").text and remote.get("/").status_code == 401   # 画面の入口はログイン画面
     assert remote.get("/runs", headers={"Authorization": "Bearer k"}).status_code == 200
     assert remote.get("/runs", headers={"Authorization": "Bearer mk"}).status_code == 401   # モデル専用キーは /v1 だけ
     assert remote.get("/runs", headers={"Authorization": "Bearer k", "Origin": "https://evil.example"}).status_code == 403
@@ -245,26 +245,14 @@ def test_remote_guard_blocks_everything_without_common_key(monkeypatch):
     assert client("100.64.0.9").post("/login", json={"secret": ""}).status_code == 401
 
 
-def test_pair_code_logs_in_once_and_only_local_can_issue(monkeypatch):
+def test_login_with_common_key_sets_session(monkeypatch):
     app, client = _remote_app(monkeypatch)
     remote = client("100.64.0.9")
-    code = client("127.0.0.1").post("/login/code").json()["code"]
-    assert remote.post("/login", json={"secret": "000000" if code != "000000" else "111111"}).status_code == 401
-    assert remote.post("/login", json={"secret": code}).status_code == 200
+    assert remote.post("/login", json={"secret": "000000"}).status_code == 401
+    assert remote.post("/login", json={"secret": "k"}).status_code == 200
     assert remote.get("/runs").status_code == 200   # Cookie でログイン済み
-    assert remote.post("/login/code").status_code == 403   # ログイン済みでも発行はこのPCだけ
-    assert client("100.64.0.10").post("/login", json={"secret": code}).status_code == 401   # 1回きり
+    assert remote.post("/login/code").status_code in (404, 405)   # 接続コードは廃止
     monkeypatch.setattr(openai_api, "api_key", lambda: "k2")   # キーの再発行でログアウト
     assert remote.get("/runs").status_code == 401
 
-
-def test_pair_code_dies_after_wrong_tries_and_expiry(monkeypatch):
-    monkeypatch.setattr(openai_api, "api_key", lambda: "k")
-    code = openai_api.new_pair_code()
-    wrong = "000000" if code != "000000" else "111111"
-    assert not any(openai_api.redeem(wrong) for _ in range(openai_api.PAIR_TRIES))
-    assert not openai_api.redeem(code)
-    code = openai_api.new_pair_code()
-    openai_api._pair["expires"] = 0
-    assert not openai_api.redeem(code)
 
