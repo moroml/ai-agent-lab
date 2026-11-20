@@ -224,6 +224,12 @@ class FakeStudio:
         monkeypatch.setattr(chat_media, "_hub", lambda: hub)
         monkeypatch.setattr(chat_media, "POLL_SEC", 0)
         monkeypatch.setattr(chat_media, "_lgs", self.lgs)
+        monkeypatch.setattr(chat_media, "_fetch_file", self.fetch)
+
+    async def fetch(self, gid, tmp):
+        with open(tmp, "wb") as f:
+            f.write(b"BYTES")
+        return self.content_type
 
     async def lgs(self, method, path, *, files=None, timeout=60.0):
         class R:
@@ -530,3 +536,29 @@ def test_keepalive_while_generating(monkeypatch, workspace):
     monkeypatch.setattr(chat_media, "POLL_SEC", 0.01)
     evs, _ = media_run(monkeypatch, [call("generate_image", prompt="x"), {"content": "ok"}])
     assert any(e.get("keepalive") for e in evs) and any("file" in e for e in evs)
+
+
+def test_fetch_file_streams_to_disk_without_leftovers(monkeypatch, workspace):
+    import httpx
+
+    class Hub:
+        llm = type("L", (), {"load_config": staticmethod(lambda: {})})
+        studio_base = staticmethod(lambda cfg: "http://lgs.test")
+        studio_token = staticmethod(lambda cfg: "tok")
+    monkeypatch.setattr(chat_media, "_hub", lambda: Hub)
+    real = httpx.AsyncClient
+    state = {"status": 200}
+
+    def handler(req):
+        assert req.headers["authorization"] == "Bearer tok" and req.url.path == "/api/files/9"
+        return httpx.Response(state["status"], content=b"x" * 200000, headers={"content-type": "video/webm"})
+    monkeypatch.setattr(chat_media.httpx, "AsyncClient", lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
+    box = tools.Toolbox(subdir="chat_f1", approve=False)
+    assert asyncio.run(chat_media._save(box, 9, "video")) == "video_9.webm"
+    work = workspace / "chat_f1"
+    assert (work / "video_9.webm").stat().st_size == 200000
+    assert [p.name for p in work.iterdir()] == ["video_9.webm"]   # .part を残さない
+    state["status"] = 404
+    with pytest.raises(chat_media.MediaError):
+        asyncio.run(chat_media._save(box, 9, "video"))
+    assert [p.name for p in work.iterdir()] == ["video_9.webm"]

@@ -175,15 +175,47 @@ async def _wait(job_id, limit):
     raise MediaError(f"生成が {limit} 秒以内に終わりませんでした。止めました。もう一度頼むか、Local Gen Studio の画面で状況を確認してください")
 
 
+async def _fetch_file(gid, tmp):
+    """LGS の生成物を tmp へストリームで保存して Content-Type を返す (全量をメモリに載せず、書き込みはスレッドで)。"""
+    hub = _hub()
+    cfg = hub.llm.load_config()
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(30, read=120), trust_env=False) as client:
+            async with client.stream("GET", hub.studio_base(cfg) + f"/api/files/{gid}",
+                                     headers={"Authorization": f"Bearer {hub.studio_token(cfg)}"}) as resp:
+                if resp.status_code >= 400:
+                    raise MediaError(f"Local Gen Studio: 生成物を取得できません (HTTP {resp.status_code})")
+                with open(tmp, "wb") as f:
+                    async for chunk in resp.aiter_bytes(1 << 16):
+                        await asyncio.to_thread(f.write, chunk)
+                return resp.headers.get("content-type", "")
+    except httpx.HTTPError as exc:
+        raise MediaError(f"Local Gen Studio から生成物を受け取れません ({exc.__class__.__name__})") from exc
+
+
+def _unlink(path):
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+
+
 async def _save(box, gid, kind):
-    resp = await _lgs("GET", f"/api/files/{gid}", timeout=120)
-    ext = FILE_EXT.get(resp.headers.get("content-type", "").split(";")[0].strip(), ".mp4" if kind == "video" else ".png")
-    rel = f"{kind}_{gid}{ext}"
-    path = box._safe_path(rel)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "wb") as f:
-        f.write(resp.content)
+    tmp = box._safe_path(f".{kind}_{gid}.part")
+    await asyncio.to_thread(os.makedirs, os.path.dirname(tmp), exist_ok=True)
+    try:
+        ctype = await _fetch_file(gid, tmp)
+        ext = FILE_EXT.get(ctype.split(";")[0].strip(), ".mp4" if kind == "video" else ".png")
+        rel = f"{kind}_{gid}{ext}"
+        await asyncio.to_thread(os.replace, tmp, box._safe_path(rel))
+    finally:
+        await asyncio.to_thread(_unlink, tmp)
     return rel
+
+
+def _read_bytes(path):
+    with open(path, "rb") as f:
+        return f.read()
 
 
 async def _upload(box, path):
@@ -191,8 +223,7 @@ async def _upload(box, path):
     p = box._safe_path(path)
     if not os.path.isfile(p) or os.path.splitext(p)[1].lower() not in IMAGE_EXTS:
         raise MediaError(f"画像ファイル(png/jpg/webp)が作業フォルダに見つかりません: {path}")
-    with open(p, "rb") as f:
-        data = f.read()
+    data = await asyncio.to_thread(_read_bytes, p)
     return (await _lgs("POST", "/api/images/upload", files={"file": (os.path.basename(p), data)})).json()["id"]
 
 
@@ -249,8 +280,8 @@ async def generate_music(cfg, box, prompt, lyrics=None, duration=None, instrumen
             raise MediaError(str(e)) from e
     rel = f"music_{os.path.splitext(result['file'])[0][:8]}.mp3"
     path = box._safe_path(rel)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    shutil.move(result["path"], path)   # 音楽画面の一覧には出さず、この会話の作業フォルダに置く
+    await asyncio.to_thread(os.makedirs, os.path.dirname(path), exist_ok=True)
+    await asyncio.to_thread(shutil.move, result["path"], path)   # 音楽画面の一覧には出さず、この会話の作業フォルダに置く
     return f"音楽を作成しました: {rel}", [rel]
 
 
@@ -270,17 +301,21 @@ def check_3d(args):
     return None
 
 
+def _prepare_3d(py, source, olds):
+    """スクリプトを書き、前の試行の出力を消す (残りを成功と取り違えないため)。"""
+    os.makedirs(os.path.dirname(py), exist_ok=True)
+    with open(py, "w", encoding="utf-8") as f:
+        f.write(source)
+    for old in olds:
+        _unlink(old)
+
+
 async def make_3d(cfg, box, name, script):
     if not os.path.isfile(BLENDER):
         raise MediaError(f"Blender が見つかりません: {BLENDER} (環境変数 BLENDER_EXE で場所を指定できます)")
     py = box._safe_path(f"{name}.py")
-    os.makedirs(os.path.dirname(py), exist_ok=True)
-    with open(py, "w", encoding="utf-8") as f:
-        f.write(RUNNER_HEAD + script + "\n" + RUNNER_TAIL)
     glb, png = box._safe_path(f"{name}.glb"), box._safe_path(f"{name}.png")
-    for old in (glb, png):   # 前の試行の残りを成功と取り違えない
-        if os.path.exists(old):
-            os.unlink(old)
+    await asyncio.to_thread(_prepare_3d, py, RUNNER_HEAD + script + "\n" + RUNNER_TAIL, (glb, png))
     proc = await asyncio.create_subprocess_exec(
         BLENDER, "-b", "--factory-startup", "--python-exit-code", "1", "--python", py, "--", glb, png,
         cwd=box.root, env=safe_env(), stdin=asyncio.subprocess.DEVNULL,
