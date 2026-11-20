@@ -290,3 +290,65 @@ def test_explicit_chat_model_is_not_replaced(client, monkeypatch):
     monkeypatch.setattr(llm, "model_usable", usable)
     r = client.post("/hub/chat", json={"model": "b", "messages": [{"role": "user", "content": "x"}]})
     assert r.status_code == 400   # b が使えないとき a に黙って差し替えない
+
+
+# ---- チャットの run_command ----
+def agent_cfg(monkeypatch, seen):
+    cfg = {**CFG, "models": {k: {**m, "tools": True} for k, m in CFG["models"].items()}}
+
+    async def installed():
+        return []
+
+    async def usable(cfg, key, inst, _p=None):
+        return (True, "ok")
+
+    async def run(cfg, key, msgs, **kw):
+        seen.append(kw)
+        yield {"content": "ok"}
+        yield {"done": True, "meta": {}}
+    monkeypatch.setattr(llm, "load_config", lambda *a, **k: cfg)
+    monkeypatch.setattr(llm, "list_models", installed)
+    monkeypatch.setattr(llm, "model_usable", usable)
+    monkeypatch.setattr(hub.chat_agent, "run", run)
+
+
+BODY = {"messages": [{"role": "user", "content": "q"}], "model": "a"}
+
+
+def test_chat_commands_off_by_default_and_on_for_pc(client, monkeypatch):
+    seen = []
+    agent_cfg(monkeypatch, seen)
+    client.post("/hub/chat", json=BODY)
+    client.post("/hub/chat", json={**BODY, "commands": True})
+    client.post("/hub/chat", json={**BODY, "commands": True, "tools": False})
+    assert [kw["commands"] for kw in seen] == [False, True]   # ツールを切っていれば commands も効かない
+
+
+@pytest.mark.parametrize("headers", [{"X-Forwarded-For": "100.64.0.2"}, {"Tailscale-User-Login": "a@b"}])
+def test_chat_commands_refused_when_not_pc_local(client, monkeypatch, headers):
+    seen = []
+    agent_cfg(monkeypatch, seen)
+    monkeypatch.setattr(hub.openai_api, "is_tailnet", lambda r: True)   # 認証は通るが、PC の画面ではない
+    r = client.post("/hub/chat", json={**BODY, "commands": True}, headers=headers)
+    assert r.status_code == 403 and "このPC" in r.json()["detail"] and not seen
+    assert client.post("/hub/chat", json=BODY, headers=headers).status_code == 200   # 使わなければ通る
+    assert seen[-1]["commands"] is False
+
+
+def test_chat_approval_endpoint(client, monkeypatch):
+    got = {}
+
+    def resolve(aid, ok):
+        got[aid] = ok
+        return aid == "a1"
+    monkeypatch.setattr(hub.chat_agent, "resolve_approval", resolve)
+    assert client.post("/hub/chat/approvals/a1", json={"approve": True}).status_code == 200
+    assert got == {"a1": True}
+    assert client.post("/hub/chat/approvals/zz", json={"approve": True}).status_code == 409
+    monkeypatch.setattr(hub.openai_api, "is_tailnet", lambda r: True)
+    r = client.post("/hub/chat/approvals/a1", json={"approve": True}, headers={"X-Forwarded-For": "100.64.0.2"})
+    assert r.status_code == 403   # 中継経由 (スマホ) からは承認できない
+
+
+def test_categories_tells_whether_commands_are_usable(client):
+    assert client.get("/hub/categories").json()["can_commands"] is True

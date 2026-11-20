@@ -66,6 +66,22 @@ def require_local_or_key(request: Request) -> None:
     openai_api._check_auth(request)
 
 
+# 中継 (Tailscale Serve など) はループバックから届くので、これらが付いた要求はこのPC自身の画面とみなさない
+PROXY_HEADERS = ("x-forwarded-for", "x-forwarded-host", "x-real-ip", "forwarded", "via",
+                 "tailscale-user-login", "tailscale-user-name")
+
+
+def is_pc_local(request: Request) -> bool:
+    """このPCの画面から直接来た要求か。ループバック接続・Host がローカルの名前・中継の印が無いこと。
+    コマンド実行の承認など、端末の持ち主だけに許す操作に使う (ログイン済みのスマホは含まない)。"""
+    try:
+        loopback = ipaddress.ip_address(request.client.host if request.client else "").is_loopback
+    except ValueError:
+        return False
+    host = urlsplit("//" + request.headers.get("host", "")).hostname
+    return loopback and host in LOCAL_HOSTS and not any(h in request.headers for h in PROXY_HEADERS)
+
+
 def category_config(cfg: dict) -> dict:
     return cfg.get("categories") or {}
 
@@ -329,6 +345,7 @@ class ChatReq(BaseModel):
     temperature: float | None = Field(default=None, ge=0.0, le=2.0)
     system: str | None = Field(default=None, max_length=20000)
     tools: bool | None = None    # ツールを使って作業する (ファイル作成・Web 調査)。None は種類の既定
+    commands: bool = False       # run_command を載せる (承認つき)。このPCの画面からだけ受け付ける
     conv: str = Field(default="default", pattern=r"^[A-Za-z0-9-]{1,64}$")   # 作業フォルダ projects/chat_<conv>/
     attach: str | None = Field(default=None, pattern=r"^[a-f0-9]{12}$")   # attach.py の添付。作業フォルダの inputs/ へ写す
 
@@ -336,6 +353,8 @@ class ChatReq(BaseModel):
 @router.post("/hub/chat")
 async def hub_chat(req: ChatReq, request: Request) -> StreamingResponse:
     require_local_or_key(request)
+    if req.commands and not is_pc_local(request):
+        raise HTTPException(403, "コマンド実行は、このPCの画面 (127.0.0.1 か localhost) からだけ使えます")
     cfg = llm.load_config()
     cat = _cat(cfg, "chat")
     key = await pick_chat_model(cfg, req.model, cat)
@@ -350,6 +369,7 @@ async def hub_chat(req: ChatReq, request: Request) -> StreamingResponse:
     info = llm.resolve(cfg, key)
     tool_cfg = cat.get("tools") or {}
     use_tools = bool(info["tools"] and (req.tools if req.tools is not None else tool_cfg.get("enabled", True)))
+    commands = use_tools and req.commands
     import attach
     secret = req.conv.startswith(SECRET_PREFIX)
     work = Path(WORKSPACE) / f"chat_{req.conv}"
@@ -361,7 +381,7 @@ async def hub_chat(req: ChatReq, request: Request) -> StreamingResponse:
 
     async def events():
         started = time.monotonic()
-        yield _sse({"model": key, "tag": info["tag"], "for": info.get("for", ""), "tools": use_tools})
+        yield _sse({"model": key, "tag": info["tag"], "for": info.get("for", ""), "tools": use_tools, "commands": commands})
 
         def answer(model, carried):
             agent = use_tools and llm.resolve(cfg, model)["tools"]
@@ -370,7 +390,7 @@ async def hub_chat(req: ChatReq, request: Request) -> StreamingResponse:
             ms = [dict(m) for m in msgs] + (carried if agent else [])
             if agent:
                 return ms, chat_agent.run(cfg, model, ms, subdir=f"chat_{req.conv}", think=think,
-                                          temperature=req.temperature, opts=tool_cfg)
+                                          temperature=req.temperature, opts=tool_cfg, commands=commands)
             return ms, llm.chat_stream(cfg, model, ms, temperature=req.temperature,
                                        num_ctx=cat.get("num_ctx"), think=think,
                                        num_predict=cat.get("num_predict"))
@@ -402,6 +422,21 @@ async def hub_chat(req: ChatReq, request: Request) -> StreamingResponse:
                 shutil.rmtree(work, ignore_errors=True)
     return StreamingResponse(events(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+class ApproveReq(BaseModel):
+    approve: bool
+
+
+@router.post("/hub/chat/approvals/{aid}")
+async def hub_chat_approval(aid: str, req: ApproveReq, request: Request) -> dict:
+    """チャットの run_command の 実行 / 拒否。このPCの画面からだけ受け付ける。"""
+    require_local_or_key(request)
+    if not is_pc_local(request):
+        raise HTTPException(403, "コマンドの承認は、このPCの画面からだけ行えます")
+    if not chat_agent.resolve_approval(aid, req.approve):
+        raise HTTPException(409, "その承認要求は存在しないか、既に応答済みです")
+    return {"status": "ok"}
 
 
 @router.delete("/hub/chat/{conv}")
@@ -638,7 +673,7 @@ async def hub_categories(request: Request) -> dict:
         chat_models.append({"key": key, "tag": m.get("tag"), "label": m.get("label", ""),
                             "for": m.get("for", ""), "backend": m.get("backend", "ollama")})
     public = {name: {k: v for k, v in c.items() if k != "system"} for name, c in cats.items()}
-    return {"categories": public, "chat_models": chat_models}
+    return {"categories": public, "chat_models": chat_models, "can_commands": is_pc_local(request)}
 
 
 def register(app) -> None:
