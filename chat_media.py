@@ -348,9 +348,12 @@ async def _blender(box, py, glb, png):
         BLENDER, "-b", "--factory-startup", "--python-exit-code", "1", "--python", py, "--", glb, png,
         cwd=box.root, env=safe_env(), stdin=asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
-    try:
-        out = await asyncio.wait_for(_read_tail(proc.stdout), BLENDER_WAIT)
+    async def drain():   # 出力が閉じた後に終わらない場合も、上限に含める
+        tail = await _read_tail(proc.stdout)
         await proc.wait()
+        return tail
+    try:
+        out = await asyncio.wait_for(drain(), BLENDER_WAIT)
     except asyncio.TimeoutError:
         raise MediaError(f"Blender が {BLENDER_WAIT} 秒以内に終わりませんでした。形を単純にして再実行してください") from None
     finally:
