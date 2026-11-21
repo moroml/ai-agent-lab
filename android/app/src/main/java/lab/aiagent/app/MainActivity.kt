@@ -2,7 +2,10 @@ package lab.aiagent.app
 
 import android.app.DownloadManager
 import android.content.Context
+import android.content.ComponentName
 import android.content.Intent
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
@@ -29,12 +32,15 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.isVisible
 import java.io.IOException
 
+private const val TAILSCALE = "com.tailscale.ipn"
+
 class MainActivity : AppCompatActivity() {
     private val prefs by lazy { getSharedPreferences("aal", Context.MODE_PRIVATE) }
     private var host = ""
     private var webView: WebView? = null
     private var webState: Bundle? = null
     private var fileCallback: ValueCallback<Array<Uri>>? = null
+    private var recheckOnResume = false // Tailscale を開いて戻ったら確認し直す
     @Volatile private var job = 0 // 古いバックグラウンド処理の結果を捨てるための世代番号
 
     private lateinit var root: ViewGroup
@@ -81,6 +87,11 @@ class MainActivity : AppCompatActivity() {
         host = prefs.getString("host", "") ?: ""
         webState = savedInstanceState?.getBundle("web")
         if (host.isEmpty()) showSetup() else check()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (recheckOnResume) { recheckOnResume = false; check() }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -138,10 +149,27 @@ class MainActivity : AppCompatActivity() {
         val my = ++job
         closeWeb()
         show(text = getString(R.string.checking), busy = true)
+        // 別の VPN が有効でも Tailscale とは限らないので、依頼は毎回送る(接続済みなら何も起きない)
+        val waitVpn = connectTailscale() && !vpnActive()
         Thread {
+            // Tailscale に接続を頼んだときは、VPN が立ち上がるまで最大10秒待つ
+            val deadline = System.currentTimeMillis() + 10_000
+            while (waitVpn && my == job && !vpnActive() && System.currentTimeMillis() < deadline) Thread.sleep(500)
             val ok = try { httpCall("https://$host:8765/health").code == 200 } catch (e: IOException) { false }
             runOnUiThread { if (my == job) if (ok) openWeb() else checkLauncher() }
         }.start()
+    }
+
+    private fun vpnActive(): Boolean {
+        val cm = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
+        return cm.getNetworkCapabilities(cm.activeNetwork)?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true
+    }
+
+    // Tailscale アプリの IPNReceiver に接続を頼む(初回の VPN 許可を済ませている必要がある)。頼めたら true
+    private fun connectTailscale(): Boolean {
+        if (packageManager.getLaunchIntentForPackage(TAILSCALE) == null) return false
+        sendBroadcast(Intent("$TAILSCALE.CONNECT_VPN").setComponent(ComponentName(TAILSCALE, "$TAILSCALE.IPNReceiver")))
+        return true
     }
 
     // 8766 の /status に届くかで、起動ボタンか到達不能の案内かを決める
@@ -153,8 +181,14 @@ class MainActivity : AppCompatActivity() {
             runOnUiThread {
                 if (my != job) return@runOnUiThread
                 if (reachable) showStopped()
-                else show(titleText = getString(R.string.stopped), text = getString(R.string.unreachable),
-                    primaryText = getString(R.string.recheck), onPrimary = { check() })
+                else {
+                    val open = packageManager.getLaunchIntentForPackage(TAILSCALE)
+                    if (open != null && !vpnActive()) show(titleText = getString(R.string.stopped),
+                        text = getString(R.string.unreachable), primaryText = getString(R.string.open_tailscale),
+                        onPrimary = { recheckOnResume = true; startActivity(open) })
+                    else show(titleText = getString(R.string.stopped), text = getString(R.string.unreachable),
+                        primaryText = getString(R.string.recheck), onPrimary = { check() })
+                }
             }
         }.start()
     }

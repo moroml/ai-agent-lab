@@ -7,6 +7,7 @@
     <string name="checking">接続を確認しています…</string>
     <string name="stopped">PC側が止まっています</string>
     <string name="unreachable">PCに届きません。PCの電源と、スマホの Tailscale がオンかを確認してください。</string>
+    <string name="open_tailscale">Tailscale を開く</string>
     <string name="recheck">もう一度確認</string>
     <string name="start">ai-agent-lab を起動</string>
     <string name="starting">起動しています…</string>
