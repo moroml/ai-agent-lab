@@ -57,9 +57,9 @@ async def _up(url: str, timeout: float = 3.0) -> bool:
 def find_processes(pattern: str) -> list[psutil.Process]:
     rx = re.compile(pattern)
     found = []
-    for p in psutil.process_iter(["cmdline"]):
-        try:
-            if rx.search(" ".join(p.info["cmdline"] or [])):
+    for p in psutil.process_iter(["name", "cmdline"]):
+        try:   # python で動くサーバーだけ (そのパスを開いたエディタなどを止めない)
+            if (p.info["name"] or "").lower().startswith("python") and rx.search(" ".join(p.info["cmdline"] or [])):
                 found.append(p)
         except (psutil.Error, TypeError):
             continue
