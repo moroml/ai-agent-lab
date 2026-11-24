@@ -3,6 +3,7 @@
 - チャット: 会話専用の軽い経路。Run を作らず、種類別の最適化値でストリーミングする
 - 画像・動画: Local Gen Studio (LGS) を中継する。トークンはサーバー側だけで持つ
 - 音楽: ACE-Step (music.py)。歌詞の下書きはチャットモデルで作る
+- 音声: ローカルの TTS サーバー (speech.py)。声の見本の登録と生成の履歴
 エージェントは既存の /run 系をそのまま使う。
 """
 from __future__ import annotations
@@ -14,11 +15,12 @@ import os
 import re
 import shutil
 import time
+import uuid
 from pathlib import Path
 from urllib.parse import urlsplit
 
 import httpx
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -27,6 +29,7 @@ import gpu_switch
 import llm
 import music
 import openai_api
+import speech
 from orchestrator import refusal_model
 from tools import WORKSPACE
 
@@ -673,6 +676,192 @@ async def music_file(name: str, request: Request):
 async def music_delete(name: str, request: Request) -> dict:
     require_local_or_key(request)
     path = _music_path(name)
+    path.unlink()
+    path.with_suffix(".json").unlink(missing_ok=True)
+    return {"deleted": name}
+
+
+# ------------------------------------------------------------------ speech
+class SpeechReq(BaseModel):
+    engine: str
+    text: str = Field(min_length=1, max_length=speech.MAX_TEXT)
+    language: str | None = Field(default=None, max_length=20)
+    voice: str | None = Field(default=None, max_length=100)   # 保存した声の名前
+    voice_text: str | None = Field(default=None, max_length=2000)
+    style: str | None = Field(default=None, max_length=1000)
+    speaker: str | None = Field(default=None, max_length=50)
+    seed: int | None = None
+    title: str | None = Field(default=None, max_length=200)
+
+
+class VoiceFromReq(BaseModel):
+    name: str | None = Field(default=None, max_length=100)
+    text: str | None = Field(default=None, max_length=2000)
+
+
+VOICE_NAME_RE = re.compile(r"^[\w\-]{1,60}$")
+
+
+def _speech_dir_file(root: Path, name: str, what: str) -> Path:
+    root = root.resolve()
+    path = (root / name).resolve()
+    if not name or "/" in name or "\\" in name or path.parent != root or path.suffix != ".wav":
+        raise HTTPException(400, f"{what}の名前が不正です")
+    if not path.is_file():
+        raise HTTPException(404, f"{what}が見つかりません")
+    return path
+
+
+def _speech_path(name: str) -> Path:
+    return _speech_dir_file(speech.SPEECH_OUT, name, "音声ファイル")
+
+
+def _voice_path(name: str) -> Path:
+    if not VOICE_NAME_RE.match(name or ""):
+        raise HTTPException(400, "声の名前が不正です")
+    return _speech_dir_file(speech.VOICES_DIR, name + ".wav", "声の見本")
+
+
+def _read_meta(path: Path) -> dict:
+    try:
+        return json.loads(path.with_suffix(".json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+@router.get("/speech/engines")
+async def speech_engines(request: Request) -> dict:
+    """エンジンの固定情報。サーバーは起動しない。"""
+    require_local_or_key(request)
+    cfg = llm.load_config()
+    return {"engines": [{"key": k, **v} for k, v in speech.ENGINES.items()], "languages": speech.LANGS,
+            "default": speech.category(cfg).get("engine") or next(iter(speech.ENGINES)),
+            "idle_unload_sec": speech.idle_unload_sec(cfg), "ffmpeg": bool(shutil.which("ffmpeg"))}
+
+
+@router.post("/speech/generate")
+async def speech_generate(req: SpeechReq, request: Request) -> dict:
+    require_local_or_key(request)
+    cfg = llm.load_config()
+    ref = str(_voice_path(req.voice)) if req.voice else None
+    try:
+        result = await speech.synthesize(
+            cfg, req.engine, req.text, language=req.language, ref_audio=ref, ref_text=req.voice_text,
+            style=req.style, speaker=req.speaker, seed=req.seed,
+            keep_loaded=speech.idle_unload_sec(cfg) > 0)   # 続けて作れるよう、しばらく経ってから降ろす
+    except speech.SpeechInputError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except gpu_switch.SwitchError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except speech.SpeechError as exc:
+        raise HTTPException(502, str(exc)) from exc
+    speech.SPEECH_OUT.mkdir(parents=True, exist_ok=True)
+    path = speech.SPEECH_OUT / (uuid.uuid4().hex[:12] + ".wav")
+    path.write_bytes(result["wav"])
+    meta = {"title": (req.title or "").strip() or req.text[:40], "text": req.text, "engine": req.engine,
+            "language": req.language, "style": req.style or "", "speaker": req.speaker or "",
+            "voice": req.voice or "", "seed": req.seed, "elapsed": result["elapsed"],
+            "duration": speech.wav_seconds(path), "created_at": time.time()}
+    try:
+        path.with_suffix(".json").write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+    except OSError:
+        pass   # メタ情報は一覧表示用。保存に失敗しても音声は返す
+    return {**meta, "file": path.name, "url": "/speech/file/" + path.name}
+
+
+@router.get("/speech/list")
+async def speech_list(request: Request) -> dict:
+    require_local_or_key(request)
+    root = speech.SPEECH_OUT
+    files = sorted(root.glob("*.wav"), key=lambda p: p.stat().st_mtime, reverse=True)[:100] if root.is_dir() else []
+    items = []
+    for p in files:
+        meta = _read_meta(p)
+        items.append({"title": meta.get("title") or p.stem, **meta, "file": p.name, "url": "/speech/file/" + p.name,
+                      "created_at": meta.get("created_at") or p.stat().st_mtime})
+    return {"items": items}
+
+
+@router.get("/speech/file/{name}")
+async def speech_file(name: str, request: Request):
+    require_local_or_key(request)
+    return FileResponse(_speech_path(name), media_type="audio/wav", filename=name)
+
+
+@router.delete("/speech/file/{name}")
+async def speech_delete(name: str, request: Request) -> dict:
+    require_local_or_key(request)
+    path = _speech_path(name)
+    path.unlink()
+    path.with_suffix(".json").unlink(missing_ok=True)
+    return {"deleted": name}
+
+
+def _voice_item(p: Path) -> dict:
+    meta = _read_meta(p)
+    return {"name": p.stem, "text": meta.get("text", ""), "duration": speech.wav_seconds(p),
+            "url": f"/speech/voices/{p.stem}/file", "created_at": p.stat().st_mtime}
+
+
+def _new_voice_name(want: str) -> str:
+    base = re.sub(r"[^\w\-]+", "_", want or "").strip("_")[:50] or "voice"
+    name = base
+    while (speech.VOICES_DIR / (name + ".wav")).exists():
+        name = f"{base}-{uuid.uuid4().hex[:4]}"
+    return name
+
+
+async def _store_voice(data: bytes, want: str, text: str) -> dict:
+    name = _new_voice_name(want)
+    path = speech.VOICES_DIR / (name + ".wav")
+    try:
+        await speech.save_voice(data, path)
+    except speech.SpeechInputError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except speech.SpeechError as exc:
+        raise HTTPException(502, str(exc)) from exc
+    if text.strip():
+        path.with_suffix(".json").write_text(json.dumps({"text": text.strip()}, ensure_ascii=False), encoding="utf-8")
+    return _voice_item(path)
+
+
+@router.get("/speech/voices")
+async def speech_voices(request: Request) -> dict:
+    require_local_or_key(request)
+    root = speech.VOICES_DIR
+    files = sorted(root.glob("*.wav"), key=lambda p: p.stat().st_mtime, reverse=True) if root.is_dir() else []
+    return {"items": [_voice_item(p) for p in files]}
+
+
+@router.post("/speech/voices")
+async def speech_voice_upload(request: Request, file: UploadFile = File(...), name: str = Form(""),
+                              text: str = Form("")) -> dict:
+    """声の見本を登録する。スマホのマイク録音 (webm/ogg/m4a) も含め、ffmpeg で mono wav (30秒まで) にする。"""
+    require_local_or_key(request)
+    data = await file.read(speech.VOICE_MAX_BYTES + 1)
+    return await _store_voice(data, name or Path(file.filename or "").stem, text)
+
+
+@router.post("/speech/voices/from/{file}")
+async def speech_voice_from(file: str, req: VoiceFromReq, request: Request) -> dict:
+    """生成した音声を声の見本として保存する (文字起こしは生成時の文章)。"""
+    require_local_or_key(request)
+    src = _speech_path(file)
+    meta = _read_meta(src)
+    text = req.text if req.text is not None else meta.get("text", "")
+    return await _store_voice(src.read_bytes(), req.name or meta.get("title", ""), text)
+
+
+@router.get("/speech/voices/{name}/file")
+async def speech_voice_file(name: str, request: Request):
+    require_local_or_key(request)
+    return FileResponse(_voice_path(name), media_type="audio/wav", filename=name + ".wav")
+
+
+@router.delete("/speech/voices/{name}")
+async def speech_voice_delete(name: str, request: Request) -> dict:
+    require_local_or_key(request)
+    path = _voice_path(name)
     path.unlink()
     path.with_suffix(".json").unlink(missing_ok=True)
     return {"deleted": name}
