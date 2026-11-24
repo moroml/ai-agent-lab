@@ -66,7 +66,7 @@ def env(monkeypatch, tmp_path):
     monkeypatch.setattr(speech.httpx, "AsyncClient", lambda **kw: ORIGINAL(transport=httpx.MockTransport(handler), **kw))
     monkeypatch.setattr(speech, "category", lambda cfg: calls.get("cat", {}))
 
-    def fake_ffmpeg(src, dst):   # 本物の ffmpeg は別のテストで使う
+    def fake_ffmpeg(src, dst, start=0):   # 本物の ffmpeg は別のテストで使う
         dst.write_bytes(make_wav(seconds=0.3))
     monkeypatch.setattr(speech, "_ffmpeg", fake_ffmpeg)
     yield calls
@@ -170,16 +170,17 @@ def test_voice_upload_use_from_result_and_delete(env):
 def test_voice_upload_rejects_bad_input(env, monkeypatch):
     async def go(c):
         assert (await c.post("/speech/voices", files={"file": ("a.wav", b"")})).status_code == 400
-        big = b"x" * (speech.VOICE_MAX_BYTES + 1)
+        monkeypatch.setattr(speech, "MEDIA_MAX_BYTES", 5000)
+        big = b"x" * 5001
         assert (await c.post("/speech/voices", files={"file": ("a.wav", big)})).status_code == 400
 
-        def bad(src, dst):
+        def bad(src, dst, start=0):
             raise speech.SpeechInputError("音声として読み取れませんでした")
         monkeypatch.setattr(speech, "_ffmpeg", bad)
         r = await c.post("/speech/voices", files={"file": ("a.wav", b"not audio" * 200)})
         assert r.status_code == 400 and "読み取れ" in r.json()["detail"]
 
-        def missing(src, dst):
+        def missing(src, dst, start=0):
             raise speech.SpeechError("ffmpeg が見つかりません")
         monkeypatch.setattr(speech, "_ffmpeg", missing)
         assert (await c.post("/speech/voices", files={"file": ("a.wav", b"x" * 2000)})).status_code == 502
@@ -193,11 +194,17 @@ def test_ffmpeg_command_and_failures(monkeypatch, tmp_path):
     class Done:
         returncode = 0
 
+    class Probe:
+        returncode = 0
+        stdout = b'{"format": {"format_name": "wav", "duration": "1.5"}}'
+
     def fake_run(cmd, **kw):
+        if "ffprobe" in cmd[0]:
+            return Probe()
         seen["cmd"] = cmd
         Path(cmd[-1]).write_bytes(b"x" * 2000)
         return Done()
-    monkeypatch.setattr(speech.shutil, "which", lambda name: "ffmpeg.exe")
+    monkeypatch.setattr(speech.shutil, "which", lambda name: name + ".exe")
     monkeypatch.setattr(speech.subprocess, "run", fake_run)
     speech._ffmpeg(tmp_path / "in.bin", tmp_path / "out.wav")
     assert seen["cmd"][seen["cmd"].index("-t") + 1] == "30" and "pcm_s16le" in seen["cmd"] and "-ac" in seen["cmd"]
@@ -306,3 +313,79 @@ def test_running_engine_skips_the_gpu_switch(env):
     env["up"] = False
     asyncio.run(speech.synthesize({}, "qwen3", "a"))
     assert env["for_speech"] == ["qwen3"]
+
+
+def test_describe_sends_frames_and_hint_to_vision_model(env, monkeypatch, tmp_path):
+    frame = tmp_path / "f.jpg"
+    frame.write_bytes(b"jpegbytes")
+    monkeypatch.setattr(speech, "_frames", lambda src, out: [frame, frame])
+    sent = {}
+
+    def handler(req):
+        if req.url.path == "/api/chat":
+            sent.update(json.loads(req.content))
+            return httpx.Response(200, json={"message": {"content": "「澄んだ高めの少女の声。」"}})
+        return httpx.Response(200, json={})
+    env["handler"] = handler
+
+    async def go(c):
+        r = await c.post("/speech/describe", files={"file": ("a.mp4", b"x" * 100)}, data={"hint": "クールに"})
+        assert r.status_code == 200, r.text
+        assert r.json()["description"] == "澄んだ高めの少女の声。" and r.json()["frames"] == 2
+        msg = sent["messages"][0]
+        assert len(msg["images"]) == 2 and "クールに" in msg["content"] and "数コマ" in msg["content"]
+        assert sent["model"] == speech.DESCRIBE_MODEL and sent["keep_alive"] == 0
+        env["handler"] = lambda req: httpx.Response(500) if req.url.path == "/api/chat" else httpx.Response(200)
+        assert (await c.post("/speech/describe", files={"file": ("a.png", b"x" * 100)})).status_code == 502
+        assert (await c.post("/speech/describe", files={"file": ("a.png", b"")})).status_code == 400
+    run(go)
+    assert env["for_speech"] == ["qwen3", "qwen3"]
+
+
+def test_voice_upload_passes_start_offset(env, monkeypatch):
+    seen = []
+
+    def fake_ffmpeg(src, dst, start=0):
+        seen.append(start)
+        dst.write_bytes(make_wav(seconds=0.3))
+    monkeypatch.setattr(speech, "_ffmpeg", fake_ffmpeg)
+
+    async def go(c):
+        r = await c.post("/speech/voices", files={"file": ("clip.mp4", b"x" * 2000)}, data={"start": "12.5"})
+        assert r.status_code == 200 and r.json()["name"] == "clip"
+        assert (await c.post("/speech/voices", files={"file": ("c.mp4", b"x" * 2000)},
+                             data={"start": "-1"})).status_code == 422
+    run(go)
+    assert seen == [12.5]
+
+
+@pytest.mark.skipif(not (shutil.which("ffmpeg") and shutil.which("ffprobe")), reason="ffmpeg が無い")
+def test_real_frames_from_image_and_video(tmp_path):
+    import subprocess
+    img, vid = tmp_path / "a.png", tmp_path / "v.mp4"
+    subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "color=red:s=64x48", "-frames:v", "1", str(img)],
+                   check=True)
+    subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "testsrc=s=64x48:d=4", "-pix_fmt", "yuv420p",
+                    str(vid)], check=True)
+    (tmp_path / "i").mkdir()
+    (tmp_path / "v").mkdir()
+    assert len(speech._frames(img, tmp_path / "i")) == 1
+    assert len(speech._frames(vid, tmp_path / "v")) == speech.DESCRIBE_FRAMES
+    (tmp_path / "bad.bin").write_bytes(b"not media" * 50)
+    with pytest.raises(speech.SpeechInputError):
+        speech._frames(tmp_path / "bad.bin", tmp_path)
+
+
+@pytest.mark.skipif(not shutil.which("ffprobe"), reason="ffprobe が無い")
+def test_probe_rejects_playlists_that_open_other_files(tmp_path):
+    secret = tmp_path / "secret.wav"
+    make_wav(secret, seconds=1)
+    m3u8 = tmp_path / "in.bin"
+    m3u8.write_text(f"#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXTINF:1,\n{secret.as_posix()}\n#EXT-X-ENDLIST\n")
+    with pytest.raises(speech.SpeechInputError):
+        speech._probe(m3u8)
+    concat = tmp_path / "c.bin"
+    concat.write_text(f"ffconcat version 1.0\nfile '{secret.as_posix()}'\n")
+    with pytest.raises(speech.SpeechInputError):
+        speech._probe(concat)
+    assert speech._probe(secret) == pytest.approx(1.0, abs=0.05)

@@ -811,11 +811,11 @@ def _new_voice_name(want: str) -> str:
     return name
 
 
-async def _store_voice(data: bytes, want: str, text: str) -> dict:
+async def _store_voice(data: bytes, want: str, text: str, start: float = 0) -> dict:
     name = _new_voice_name(want)
     path = speech.VOICES_DIR / (name + ".wav")
     try:
-        await speech.save_voice(data, path)
+        await speech.save_voice(data, path, start)
     except speech.SpeechInputError as exc:
         raise HTTPException(400, str(exc)) from exc
     except speech.SpeechError as exc:
@@ -835,11 +835,26 @@ async def speech_voices(request: Request) -> dict:
 
 @router.post("/speech/voices")
 async def speech_voice_upload(request: Request, file: UploadFile = File(...), name: str = Form(""),
-                              text: str = Form("")) -> dict:
-    """声の見本を登録する。スマホのマイク録音 (webm/ogg/m4a) も含め、ffmpeg で mono wav (30秒まで) にする。"""
+                              text: str = Form(""), start: float = Form(0, ge=0, le=86400)) -> dict:
+    """声の見本を登録する。マイク録音 (webm/ogg/m4a) や動画の音声も、ffmpeg で start 秒から mono wav (30秒) にする。"""
     require_local_or_key(request)
-    data = await file.read(speech.VOICE_MAX_BYTES + 1)
-    return await _store_voice(data, name or Path(file.filename or "").stem, text)
+    data = await file.read(speech.MEDIA_MAX_BYTES + 1)
+    return await _store_voice(data, name or Path(file.filename or "").stem, text, start)
+
+
+@router.post("/speech/describe")
+async def speech_describe(request: Request, file: UploadFile = File(...), hint: str = Form("", max_length=500)) -> dict:
+    """画像・動画の見た目から、似合う声の説明文を書く (説明は /speech/generate の style へ渡して声を作る)。"""
+    require_local_or_key(request)
+    data = await file.read(speech.MEDIA_MAX_BYTES + 1)
+    try:
+        return await speech.describe_voice(llm.load_config(), data, hint)
+    except speech.SpeechInputError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except gpu_switch.SwitchError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except speech.SpeechError as exc:
+        raise HTTPException(502, str(exc)) from exc
 
 
 @router.post("/speech/voices/from/{file}")

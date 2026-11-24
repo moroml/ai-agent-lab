@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import json
 import shutil
 import subprocess
 import tempfile
@@ -24,7 +26,9 @@ SPEECH_WAIT = 900            # 音声合成を待つ上限秒 (初回はモデ�
 IDLE_UNLOAD_SEC = 120        # 画面からの生成のあと、モデルを降ろすまでの既定秒
 MAX_TEXT = 5000
 VOICE_MAX_SEC = 30           # 声の見本に使う長さの上限
-VOICE_MAX_BYTES = 20 * 1024 * 1024
+MEDIA_MAX_BYTES = 200 * 1024 * 1024   # 声の見本・声の説明に渡すファイル (動画を含む) の上限
+DESCRIBE_MODEL = "gemma4:12b"         # 画像から声の説明を書く Ollama のモデル (speech.describe_model で変更可)
+DESCRIBE_FRAMES = 3                   # 動画から切り出すコマ数
 
 LANGS = {"ja": "日本語", "en": "英語", "zh": "中国語", "ko": "韓国語", "de": "ドイツ語", "fr": "フランス語",
          "ru": "ロシア語", "pt": "ポルトガル語", "es": "スペイン語", "it": "イタリア語", "ar": "アラビア語"}
@@ -68,6 +72,11 @@ class SpeechInputError(SpeechError):
 def _hub():
     import hub   # hub が chat_agent→chat_media→speech を import するので、使うときに読む
     return hub
+
+
+def _llm():
+    import llm
+    return llm
 
 
 def category(cfg: dict) -> dict:
@@ -173,29 +182,120 @@ def wav_seconds(path: Path) -> float | None:
         return None
 
 
-def _ffmpeg(src: Path, dst: Path) -> None:
-    exe = shutil.which("ffmpeg")
+def _run_tool(name: str, args: list[str], timeout: float = 120) -> subprocess.CompletedProcess:
+    exe = shutil.which(name)
     if not exe:
-        raise SpeechError("ffmpeg が見つかりません。音声の変換にはインストールが必要です")
+        raise SpeechError(f"{name} が見つかりません。音声・動画の変換にはインストールが必要です")
     try:
-        done = subprocess.run([exe, "-y", "-v", "error", "-i", str(src), "-vn", "-t", str(VOICE_MAX_SEC),
-                               "-ac", "1", "-c:a", "pcm_s16le", str(dst)],
-                              capture_output=True, timeout=60, check=False,
+        return subprocess.run([exe, *args], capture_output=True, timeout=timeout, check=False,
                               creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     except (OSError, subprocess.SubprocessError) as exc:
-        raise SpeechError(f"音声を変換できませんでした: {exc.__class__.__name__}") from exc
+        raise SpeechError(f"{name} を実行できませんでした: {exc.__class__.__name__}") from exc
+
+
+# ffmpeg に渡してよい入力の形式 (ffprobe の format_name)。プレイリスト (hls・concat 等) は中から別のファイルや
+# URL を開くので通さない
+MEDIA_FORMATS = {"mov", "mp4", "m4a", "3gp", "3g2", "mj2", "matroska", "webm", "ogg", "wav", "w64", "mp3", "flac",
+                 "aac", "aiff", "caf", "amr", "avi", "asf", "flv", "mpegts", "image2", "png_pipe", "jpeg_pipe",
+                 "webp_pipe", "bmp_pipe", "gif", "gif_pipe"}
+
+
+def _probe(src: Path) -> float:
+    """形式を確かめて長さ (秒、画像は 0) を返す。許可していない形式は SpeechInputError。"""
+    done = _run_tool("ffprobe", ["-v", "error", "-protocol_whitelist", "file", "-show_entries",
+                                 "format=format_name,duration", "-of", "json", str(src)], 60)
+    try:
+        fmt = json.loads(done.stdout.decode() or "{}").get("format") or {}
+    except ValueError:
+        fmt = {}
+    if not set(str(fmt.get("format_name", "")).split(",")) & MEDIA_FORMATS:
+        raise SpeechInputError("音声・画像・動画として読み取れませんでした。別のファイルで試してください")
+    try:
+        return float(fmt.get("duration") or 0)
+    except ValueError:
+        return 0.0
+
+
+def _ffmpeg(src: Path, dst: Path, start: float = 0) -> None:
+    _probe(src)
+    done = _run_tool("ffmpeg", ["-y", "-v", "error", "-ss", str(max(0.0, start)), "-i", str(src), "-vn",
+                                "-t", str(VOICE_MAX_SEC), "-ac", "1", "-c:a", "pcm_s16le", str(dst)])
     if done.returncode != 0 or not dst.is_file() or dst.stat().st_size < 1000:
-        raise SpeechInputError("音声として読み取れませんでした。別のファイルで試してください")
+        raise SpeechInputError("音声として読み取れませんでした。別のファイルか、別の開始位置で試してください")
 
 
-async def save_voice(data: bytes, dest: Path) -> float | None:
-    """任意の音声 data を mono PCM16 の wav (30 秒まで) にして dest へ保存し、長さ(秒)を返す。"""
-    if not data or len(data) > VOICE_MAX_BYTES:
-        raise SpeechInputError("音声ファイルは 20MB 以下にしてください")
+def _check_size(data: bytes) -> None:
+    if not data or len(data) > MEDIA_MAX_BYTES:
+        raise SpeechInputError(f"ファイルは {MEDIA_MAX_BYTES // 1024 // 1024}MB 以下にしてください")
+
+
+async def save_voice(data: bytes, dest: Path, start: float = 0) -> float | None:
+    """音声・動画 data の start 秒から 30 秒を mono PCM16 の wav にして dest へ保存し、長さ(秒)を返す。"""
+    _check_size(data)
     with tempfile.TemporaryDirectory() as tmp:
         src, out = Path(tmp) / "in.bin", Path(tmp) / "out.wav"
-        src.write_bytes(data)
-        await asyncio.to_thread(_ffmpeg, src, out)
+        await asyncio.to_thread(src.write_bytes, data)   # 200MB まであるので待たせない
+        await asyncio.to_thread(_ffmpeg, src, out, start)
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(out), dest)
     return wav_seconds(dest)
+
+
+# --- 画像・動画の見た目から声の説明を書く ---
+DESCRIBE_PROMPT = """この画像の人物(キャラクター)が話すとしたら、どんな声が似合うか考えてください。
+見た目(年齢・性別・雰囲気・表情・服装)から想像し、音声合成に渡す「声の説明」を日本語で1〜2文で書いてください。
+声の高さ・年齢感・性別・声質(澄んだ/ハスキー等)・話す速さ・感情や話し方の癖を必ず含めてください。
+人物がいなければ、その画像の雰囲気に合うナレーターの声を説明してください。
+説明文だけを出力し、前置きや見た目の描写は書かないでください。"""
+
+
+def _frames(src: Path, out_dir: Path) -> list[Path]:
+    """画像は1枚、動画は全体から等間隔に DESCRIBE_FRAMES コマを、長辺 1024 の jpg にする。"""
+    duration = _probe(src)   # 画像 (と長さの取れないもの) は 0 で、先頭の1コマ
+    points = [duration * (i + 1) / (DESCRIBE_FRAMES + 1) for i in range(DESCRIBE_FRAMES)] if duration > 1 else [0.0]
+    scale = "scale='min(1024,iw)':'min(1024,ih)':force_original_aspect_ratio=decrease"
+    frames = []
+    for i, t in enumerate(points):
+        dst = out_dir / f"f{i}.jpg"
+        _run_tool("ffmpeg", ["-y", "-v", "error", "-ss", f"{t:.2f}", "-i", str(src), "-frames:v", "1",
+                             "-vf", scale, "-q:v", "3", str(dst)])
+        if dst.is_file() and dst.stat().st_size > 0:
+            frames.append(dst)
+    if not frames:
+        raise SpeechInputError("画像・動画として読み取れませんでした。別のファイルで試してください")
+    return frames
+
+
+async def describe_voice(cfg: dict, data: bytes, hint: str = "") -> dict:
+    """画像・動画を見せて、似合う声の説明文 (VoiceDesign に渡す) を書かせる。{"description", "elapsed"} を返す。"""
+    _check_size(data)
+    started = time.monotonic()
+    with tempfile.TemporaryDirectory() as tmp:
+        src = Path(tmp) / "in.bin"
+        await asyncio.to_thread(src.write_bytes, data)
+        images = [base64.b64encode(p.read_bytes()).decode() for p in await asyncio.to_thread(_frames, src, Path(tmp))]
+    prompt = DESCRIBE_PROMPT
+    if len(images) > 1:
+        prompt += "\n画像は同じ動画から切り出した数コマです。"
+    if hint.strip():
+        prompt += f"\n利用者の希望: {hint.strip()[:500]}"
+    model = category(cfg).get("describe_model") or DESCRIBE_MODEL
+    body = {"model": model, "stream": False, "think": False, "keep_alive": 0,   # 書いたらすぐ降ろす (次は音声合成)
+            "messages": [{"role": "user", "content": prompt, "images": images}],
+            "options": {"temperature": 0.5, "num_predict": 400}}
+    cancel_idle()
+    async with gpu_switch.music_busy:
+        hub = _hub()
+        await hub.free_vram_for_generation(cfg, category(cfg), hub._music_running())   # 他の LLM を降ろす
+        await gpu_switch.for_speech(cfg, "qwen3")   # ComfyUI・ACE-Step・他の音声合成を空ける (次の試し声は qwen3)
+        await unload(cfg, "qwen3")
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(30, read=300), trust_env=False) as client:
+                resp = await client.post(f"{_llm().OLLAMA_BASE}/api/chat", json=body)
+            resp.raise_for_status()
+            text = (resp.json().get("message") or {}).get("content", "").strip()
+        except (httpx.HTTPError, ValueError) as exc:
+            raise SpeechError(f"{model} で声の説明を作れませんでした ({exc.__class__.__name__})") from exc
+    if not text:
+        raise SpeechError(f"{model} が空の説明を返しました。もう一度試してください")
+    return {"description": text.strip("「」\"' \n"), "elapsed": round(time.monotonic() - started, 2), "frames": len(images)}
