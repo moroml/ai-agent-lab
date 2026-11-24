@@ -1,14 +1,45 @@
 // 音声: ローカルの音声合成 (Qwen3-TTS / IndexTTS-2.5 / Fish) で文章を読み上げ、履歴で聴き比べる画面。
 // 声の見本はファイルかマイク録音で登録する。モデルは最後の生成からしばらくして自動で降ろす。
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { AudioLines, Download, Mic, RefreshCw, Square, Trash2, Upload, UserRound } from "lucide-react";
 import { Button, Chips, ErrorNote, Field, inputCls } from "./ui.jsx";
 import { fmtTime, MAX_REC_SEC, MAX_TEXT, useSpeech } from "./useSpeech.js";
+import BatchView from "./BatchView.jsx";
+import VoiceCreateView from "./VoiceCreateView.jsx";
 
 const LICENSE_NOTE = { false: "商用利用は不可 (研究・個人利用向け)", null: "商用利用はライセンスを確認してください", true: "商用利用可" };
 
+const TABS = [
+  { id: "read", label: "読み上げ" },
+  { id: "create", label: "声を作る" },
+  { id: "batch", label: "一括書き出し" },
+];
+
+// 上の切り替えで3つの画面を行き来する。状態は useSpeech が持ち、どの画面からも同じ声の見本を使う
 export default function SpeechView() {
   const s = useSpeech();
+  const [tab, setTab] = useState("read");
+  const useVoice = (name) => { s.pickVoice(name); setTab("read"); };
+  return (
+    <div className="flex h-full flex-col">
+      <div role="tablist" aria-label="音声の画面" className="flex shrink-0 gap-1 border-b border-slate-800 px-4 pt-2">
+        {TABS.map((t) => (
+          <button key={t.id} type="button" role="tab" id={`speech-tab-${t.id}`} aria-selected={tab === t.id} aria-controls="speech-panel" onClick={() => setTab(t.id)}
+                  className={`min-h-10 border-b-2 px-3 text-sm transition ${tab === t.id ? "border-cyan-400 font-semibold text-cyan-200" : "border-transparent text-slate-400 hover:text-slate-200"}`}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+      <div role="tabpanel" id="speech-panel" aria-labelledby={`speech-tab-${tab}`} className="min-h-0 flex-1">
+        {tab === "read" && <ReadPanel s={s} />}
+        {tab === "create" && <VoiceCreateView s={s} onUse={useVoice} />}
+        {tab === "batch" && <BatchView s={s} active />}
+      </div>
+    </div>
+  );
+}
+
+function ReadPanel({ s }) {
   const { info, engine, form, set } = s;
   const file = useRef(null);
   const loaded = s.items !== undefined;
