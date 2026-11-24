@@ -1,7 +1,7 @@
 // スマホ版の外枠。上に「PCの稼働状況」の1行、下に種類のタブ。画面の中身は種類ごとの *Screen.jsx。
 // 一度開いた画面は隠すだけで残す (切り替えても生成中の追跡や会話の受信が途切れないように)。
 import { Component, Suspense, useCallback, useEffect, useState } from "react";
-import { Bot, ChevronRight, Clapperboard, Image as ImageIcon, MessageSquare, Music } from "lucide-react";
+import { AudioLines, Bot, ChevronRight, Clapperboard, Image as ImageIcon, MessageSquare, Music } from "lucide-react";
 import { NEEDS, useEngines } from "../components/EngineButton.jsx";
 import { lazyView } from "../lazyView.js";
 import { Button, cx, Loading, Notice, Sheet } from "./ui.jsx";
@@ -11,6 +11,7 @@ const AgentScreen = lazyView(() => import("./AgentScreen.jsx"));
 const ImageScreen = lazyView(() => import("./ImageScreen.jsx"));
 const VideoScreen = lazyView(() => import("./VideoScreen.jsx"));
 const MusicScreen = lazyView(() => import("./MusicScreen.jsx"));
+const SpeechScreen = lazyView(() => import("./SpeechScreen.jsx"));
 const EnginesScreen = lazyView(() => import("./EnginesScreen.jsx"));
 
 const TABS = [
@@ -19,6 +20,7 @@ const TABS = [
   { id: "image", label: "画像", icon: ImageIcon },
   { id: "video", label: "動画", icon: Clapperboard },
   { id: "music", label: "音楽", icon: Music },
+  { id: "speech", label: "音声", icon: AudioLines },
 ];
 const IDS = new Set(TABS.map((t) => t.id));
 
@@ -108,6 +110,7 @@ export default function MobileApp() {
         {pane("image", <ImageScreen eng={eng} onToVideo={toVideo} />)}
         {pane("video", <VideoScreen eng={eng} source={videoSource} onSourceChange={setVideoSource} />)}
         {pane("music", <MusicScreen eng={eng} />)}
+        {pane("speech", <SpeechScreen />)}
       </main>
 
       {eng.note && !enginesOpen && (

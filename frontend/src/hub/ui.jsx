@@ -7,6 +7,7 @@ export const ACCENTS = {
   emerald: { btn: "bg-emerald-600 hover:bg-emerald-500", ring: "focus:ring-emerald-500/50", text: "text-emerald-300", soft: "bg-emerald-500/10 border-emerald-500/30", bar: "bg-emerald-500" },
   violet: { btn: "bg-violet-600 hover:bg-violet-500", ring: "focus:ring-violet-500/50", text: "text-violet-300", soft: "bg-violet-500/10 border-violet-500/30", bar: "bg-violet-500" },
   rose: { btn: "bg-rose-600 hover:bg-rose-500", ring: "focus:ring-rose-500/50", text: "text-rose-300", soft: "bg-rose-500/10 border-rose-500/30", bar: "bg-rose-500" },
+  cyan: { btn: "bg-cyan-600 hover:bg-cyan-500", ring: "focus:ring-cyan-500/50", text: "text-cyan-300", soft: "bg-cyan-500/10 border-cyan-500/30", bar: "bg-cyan-500" },
   amber: { btn: "bg-amber-600 hover:bg-amber-500", ring: "focus:ring-amber-500/50", text: "text-amber-300", soft: "bg-amber-500/10 border-amber-500/30", bar: "bg-amber-500" },
 };
 

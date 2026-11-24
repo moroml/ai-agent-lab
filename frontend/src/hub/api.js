@@ -67,3 +67,19 @@ export const draftLyrics = (body) => post("/hub/lyrics", body);
 export const discardMusic = (file) =>
   fetch(`/music/file/${encodeURIComponent(file)}`, { method: "DELETE", keepalive: true }).catch(() => {});
 export const deleteMusic = (file) => fetch(`/music/file/${encodeURIComponent(file)}`, { method: "DELETE" }).then(jsonOrThrow);
+
+export const speechEngines = () => get("/speech/engines");
+export const speechList = () => get("/speech/list");
+export const generateSpeech = (body) => post("/speech/generate", body);
+export const deleteSpeech = (file) => fetch(`/speech/file/${encodeURIComponent(file)}`, { method: "DELETE" }).then(jsonOrThrow);
+export const speechVoices = () => get("/speech/voices");
+export const deleteVoice = (name) => fetch(`/speech/voices/${encodeURIComponent(name)}`, { method: "DELETE" }).then(jsonOrThrow);
+// 声の見本の登録。ファイルも、マイクの録音 (webm/ogg/m4a) もそのまま送る (サーバーが wav にする)
+export function uploadVoice(blob, filename, name, text) {
+  const body = new FormData();
+  body.append("file", blob, filename);
+  body.append("name", name || "");
+  body.append("text", text || "");
+  return fetch("/speech/voices", { method: "POST", body }).then(jsonOrThrow);
+}
+export const voiceFromResult = (file, body = {}) => post(`/speech/voices/from/${encodeURIComponent(file)}`, body);

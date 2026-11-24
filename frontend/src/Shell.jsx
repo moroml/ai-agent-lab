@@ -1,7 +1,7 @@
-// 種類別ワークスペースの外枠。左(狭い幅では下)のレールでチャット/エージェント/画像/動画/音楽を切り替える。
+// 種類別ワークスペースの外枠。左(狭い幅では下)のレールでチャット/エージェント/画像/動画/音楽/音声を切り替える。
 // エージェント(App)は切り替えても状態(下書き・SSE)を保つため常に描画し、非表示にするだけにする。
 import { Suspense, useCallback, useEffect, useState } from "react";
-import { Bot, Clapperboard, Image as ImageIcon, MessageSquare, Music } from "lucide-react";
+import { AudioLines, Bot, Clapperboard, Image as ImageIcon, MessageSquare, Music } from "lucide-react";
 import App from "./App.jsx";
 import { lazyView } from "./lazyView.js";
 import { EngineBanner, EngineNavButton, EngineToast, useEngines } from "./components/EngineButton.jsx";
@@ -10,6 +10,7 @@ const ChatView = lazyView(() => import("./hub/ChatView.jsx"));
 const ImageView = lazyView(() => import("./hub/ImageView.jsx"));
 const VideoView = lazyView(() => import("./hub/VideoView.jsx"));
 const MusicView = lazyView(() => import("./hub/MusicView.jsx"));
+const SpeechView = lazyView(() => import("./hub/SpeechView.jsx"));
 const EnginesView = lazyView(() => import("./components/EnginesView.jsx"));
 
 const KINDS = [
@@ -18,6 +19,7 @@ const KINDS = [
   { id: "image", label: "画像", icon: ImageIcon, active: "text-violet-300 bg-violet-500/10" },
   { id: "video", label: "動画", icon: Clapperboard, active: "text-rose-300 bg-rose-500/10" },
   { id: "music", label: "音楽", icon: Music, active: "text-amber-300 bg-amber-500/10" },
+  { id: "speech", label: "音声", icon: AudioLines, active: "text-cyan-300 bg-cyan-500/10" },
 ];
 const IDS = new Set([...KINDS.map((k) => k.id), "engines"]);
 
@@ -79,6 +81,7 @@ export default function Shell() {
           {pane("image", <ImageView onToVideo={toVideo} />)}
           {pane("video", <VideoView source={videoSource} onSourceChange={setVideoSource} />)}
           {pane("music", <MusicView />)}
+          {pane("speech", <SpeechView />)}
           {pane("engines", <EnginesView eng={eng} />)}
         </div>
       </main>
