@@ -93,8 +93,10 @@ SCHEMA = [
             "language": {"type": "string", "description": "ja / en / zh など。省略で自動"},
             "voice": {"type": "string", "description": "まねる声の音声 (作業フォルダからの相対。wav/mp3/flac、3〜20秒)"},
             "voice_text": {"type": "string", "description": "voice の音声で話している内容 (分かれば。似せる精度が上がる)"},
-            "style": {"type": "string", "description": "話し方の指示。qwen3 は声の特徴や口調、indextts は感情、fish は演技"},
-            "speaker": {"type": "string", "description": "qwen3 のプリセット話者名。省略可"}},
+            "style": {"type": "string", "description": "話し方の指示。qwen3: 声の特徴や口調の説明 (日本語可)。indextts: 感情 "
+                                                       "(例 とても嬉しそうに)。fish: 英語の短い演技指示 (例 whisper / cheerful, excited)"},
+            "speaker": {"type": "string", "description": "qwen3 のプリセット話者。Ono_Anna (日本語・女性・既定) / Vivian / Serena / "
+                                                         "Uncle_Fu / Dylan / Eric / Ryan / Aiden / Sohee。省略可"}},
             "required": ["text"]}}},
     {"type": "function", "function": {
         "name": "generate_3d",
