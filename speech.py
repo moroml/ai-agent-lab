@@ -41,7 +41,7 @@ ENGINES = {
         "license": "Apache-2.0", "commercial": True,
     },
     "indextts": {
-        "label": "IndexTTS2", "description": "声の見本から声を複製し、感情を文章で指定できる。見本なしなら付属の声",
+        "label": "IndexTTS-2.5", "description": "声の見本から声を複製し、感情を文章で指定できる。見本なしなら付属の声",
         "languages": ["ja", "en", "zh", "es", "ar"], "speakers": [], "default_speaker": "",
         "style_placeholder": "例: とても嬉しそうに、興奮して",
         "style_help": "感情を表す文章。付属の感情モデルが感情に変換する。声は常に見本から複製する",

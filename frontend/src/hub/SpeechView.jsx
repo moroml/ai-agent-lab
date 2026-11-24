@@ -1,4 +1,4 @@
-// 音声: ローカルの音声合成 (Qwen3-TTS / IndexTTS2 / Fish) で文章を読み上げ、履歴で聴き比べる画面。
+// 音声: ローカルの音声合成 (Qwen3-TTS / IndexTTS-2.5 / Fish) で文章を読み上げ、履歴で聴き比べる画面。
 // 声の見本はファイルかマイク録音で登録する。モデルは最後の生成からしばらくして自動で降ろす。
 import { useRef } from "react";
 import { AudioLines, Download, Mic, RefreshCw, Square, Trash2, Upload, UserRound } from "lucide-react";
