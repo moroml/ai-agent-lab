@@ -18,6 +18,8 @@ import uuid
 import httpx
 from fastapi import HTTPException
 
+import speech
+
 POLL_SEC = 2.0
 IMAGE_WAIT = 900     # 画像の完了を待つ上限秒
 VIDEO_WAIT = 1800
@@ -30,8 +32,7 @@ BLENDER_WAIT = 180   # Blender を待つ上限秒
 TAIL_BYTES = 20000   # Blender の出力で残す末尾 (エラー文の探索用)
 SCRIPT_MAX = 50000
 NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
-SPEECH_WAIT = 900    # 音声合成を待つ上限秒 (初回はモデルの読み込みを含む)
-SPEECH_ENGINES = ("qwen3", "indextts", "fish")
+SPEECH_ENGINES = tuple(speech.ENGINES)
 AUDIO_EXTS = (".wav", ".mp3", ".flac", ".ogg", ".m4a")
 TRELLIS_WAIT = 3600 # TRELLIS 2 (形→高解像度→色の3段) を待つ上限秒
 TRELLIS_WORKFLOW = os.path.join(os.path.dirname(os.path.abspath(__file__)), "workflows", "trellis2_image_to_3d.json")
@@ -352,51 +353,23 @@ async def generate_speech(cfg, box, text, engine=None, language=None, voice=None
     engine = engine or hub._cat(cfg, "speech").get("engine") or SPEECH_ENGINES[0]
     if engine not in SPEECH_ENGINES:
         raise ValueError(f"engine は {' / '.join(SPEECH_ENGINES)} のどれか")
-    body = {"text": str(text)}
+    ref = None
     if voice:
-        path = box._safe_path(str(voice))
-        if not path.lower().endswith(AUDIO_EXTS) or not await asyncio.to_thread(os.path.isfile, path):
+        ref = box._safe_path(str(voice))
+        if not ref.lower().endswith(AUDIO_EXTS) or not await asyncio.to_thread(os.path.isfile, ref):
             raise MediaError(f"声の見本の音声が作業フォルダにありません (wav/mp3/flac): {voice}")
-        if not os.path.realpath(path).startswith(os.path.realpath(box.root) + os.sep):   # リンクで外を指すもの
+        if not os.path.realpath(ref).startswith(os.path.realpath(box.root) + os.sep):   # リンクで外を指すもの
             raise MediaError(f"声の見本は作業フォルダの中のファイルにしてください: {voice}")
-        body["ref_audio"] = path
-    body.update({k: str(v) for k, v in (("ref_text", voice_text), ("language", language),
-                                         ("style", style), ("speaker", speaker)) if v})
-    sw = hub.gpu_switch
-    async with sw.music_busy:   # 生成中に音楽・画像側がこのエンジンを止めないように
-        await _free_vram(cfg, "speech")
-        try:
-            await sw.for_speech(cfg, engine)
-        except sw.SwitchError as exc:
-            raise MediaError(str(exc)) from exc
-        base = sw.settings(cfg)["speech"][engine]["base"].rstrip("/")
-        try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(30, read=SPEECH_WAIT), trust_env=False) as client:
-                try:
-                    resp = await client.post(base + "/tts", json=body)
-                finally:
-                    if hub._cat(cfg, "speech").get("unload_after", True):   # 続く返答の LLM に VRAM を返す
-                        try:
-                            freed = (await client.post(base + "/unload", timeout=30)).status_code == 200
-                        except httpx.HTTPError:
-                            freed = False
-                        if not freed:   # 降ろせなければプロセスごと止めて VRAM を返す
-                            try:
-                                await sw.stop_speech(cfg)
-                            except sw.SwitchError:
-                                pass
-        except httpx.HTTPError as exc:
-            raise MediaError(f"音声合成 {engine} から応答がありません ({exc.__class__.__name__})") from exc
-    if resp.status_code >= 400:
-        try:
-            detail = resp.json().get("error")
-        except ValueError:
-            detail = None
-        raise MediaError(f"音声合成 {engine}: {detail or f'HTTP {resp.status_code}'}")
+    keep = not hub._cat(cfg, "speech").get("unload_after", True)   # 既定は、続く返答の LLM に VRAM を返すため生成のたびに降ろす
+    try:
+        result = await speech.synthesize(cfg, engine, text, language=language, ref_audio=ref, ref_text=voice_text,
+                                         style=style, speaker=speaker, keep_loaded=keep)
+    except (speech.SpeechError, speech.gpu_switch.SwitchError) as exc:
+        raise MediaError(str(exc)) from exc
     rel = f"speech_{uuid.uuid4().hex[:8]}.wav"
     path = box._safe_path(rel)
     await asyncio.to_thread(os.makedirs, os.path.dirname(path), exist_ok=True)
-    await asyncio.to_thread(_write_bytes, path, resp.content)
+    await asyncio.to_thread(_write_bytes, path, result["wav"])
     return f"音声を作成しました: {rel} ({engine})", [rel]
 
 

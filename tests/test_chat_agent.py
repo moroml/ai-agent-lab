@@ -199,6 +199,7 @@ def test_run_command_refused_before_asking(monkeypatch, workspace, args):
 
 # ---- 画像・動画 (LGS は差し替え) ----
 import chat_media   # noqa: E402
+import speech   # noqa: E402
 
 
 class FakeStudio:
@@ -822,6 +823,8 @@ def speech_hub(monkeypatch, handler, seen, cat=None):
         async def free_vram_for_generation(cfg, c, running):
             return []
     monkeypatch.setattr(chat_media, "_hub", lambda: Hub)
+    monkeypatch.setattr(speech, "_hub", lambda: Hub)
+    monkeypatch.setattr(speech, "gpu_switch", Switch)
     monkeypatch.setattr(chat_media.httpx, "AsyncClient",
                         lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
 
