@@ -694,7 +694,7 @@ XL 用のモデル読み込みと offload / INT8 設定は ACE-Step サービス
 
 ## 音声合成（Qwen3-TTS / IndexTTS-2.5 / Fish Audio S2-Pro, 2026-11-24）
 
-チャットのツール `generate_speech` で文章を wav にする。3つのエンジンは別々の環境 `C:\project	ts-<engine>` に入れてあり（導入手順は各フォルダの `setup.ps1` と README）、共通の HTTP API（`GET /health` `GET /info` `POST /tts` `POST /unload`）で呼ぶ。
+チャットのツール `generate_speech` で文章を wav にする。3つのエンジンは別々の環境 `C:/project/tts-<engine>` に入れてあり（導入手順は各フォルダの `setup.ps1` と README）、共通の HTTP API（`GET /health` `GET /info` `POST /tts` `POST /unload`）で呼ぶ。
 サーバーは使うときに `gpu_switch` が起動する（`start-detached.ps1`）。VRAM 16GB に同時に載らないため、音声の前に ComfyUI の解放・ACE-Step と他の音声合成の停止を行い、音楽・画像・動画の前には音声合成を止める。
 生成の後はモデルを降ろす（`categories.speech.unload_after`。続く返答の LLM が VRAM から押し出されないように。その分、毎回モデルの読み込みが入る）。「VRAM をまとめて空ける」は音声合成のサーバーも止める。
 
