@@ -801,6 +801,10 @@ def speech_hub(monkeypatch, handler, seen, cat=None):
         music_busy = asyncio.Lock()
 
         @staticmethod
+        async def speech_up(cfg, engine):
+            return False
+
+        @staticmethod
         async def for_speech(cfg, engine):
             seen["engine"] = engine
             return []

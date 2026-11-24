@@ -141,7 +141,8 @@ async def synthesize(cfg: dict, engine: str, text: str, *, language=None, ref_au
     async with gpu_switch.music_busy:   # 生成中に音楽・画像側がこのエンジンを止めないように
         hub = _hub()
         await hub.free_vram_for_generation(cfg, category(cfg), hub._music_running())
-        await gpu_switch.for_speech(cfg, engine)   # 起動済みなら解放と確認だけで戻る
+        if not await gpu_switch.speech_up(cfg, engine):   # 起動済みなら切り替えは要らない (確認だけで毎回約2.5秒かかる)
+            await gpu_switch.for_speech(cfg, engine)
         base = gpu_switch.settings(cfg)["speech"][engine]["base"].rstrip("/")
         try:
             async with httpx.AsyncClient(timeout=httpx.Timeout(30, read=SPEECH_WAIT), trust_env=False) as client:

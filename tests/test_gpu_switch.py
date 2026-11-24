@@ -150,3 +150,16 @@ def test_speech_stops_others_and_starts_engine(monkeypatch):
 def test_speech_unknown_engine_is_reported():
     with pytest.raises(gpu_switch.SwitchError, match="見つかりません: nope"):
         asyncio.run(gpu_switch.for_speech(CFG, "nope"))
+
+
+def test_speech_up_checks_only_the_engines_health(monkeypatch):
+    urls = []
+
+    async def up(url, timeout=3.0):
+        urls.append(url)
+        return url.startswith("http://127.0.0.1:8011")
+    monkeypatch.setattr(gpu_switch, "_up", up)
+    assert asyncio.run(gpu_switch.speech_up({}, "qwen3")) is True
+    assert asyncio.run(gpu_switch.speech_up({}, "fish")) is False
+    assert asyncio.run(gpu_switch.speech_up({}, "nope")) is False
+    assert urls == ["http://127.0.0.1:8011/health", "http://127.0.0.1:8013/health"]

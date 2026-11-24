@@ -147,6 +147,13 @@ async def for_music(cfg: dict) -> list[str]:
                                    s["start_timeout"], "C:/project/ace-step/server.log")
 
 
+async def speech_up(cfg: dict, engine: str) -> bool:
+    """音声合成 engine がもう起動していれば True。音楽・画像の前は音声合成を止めるので、起動中なら他に GPU を使うものは無く、
+    for_speech の解放と確認 (実測 約2.5秒) を省ける。"""
+    e = settings(cfg)["speech"].get(engine)
+    return bool(e) and await _up(e["base"].rstrip("/") + "/health")
+
+
 async def for_speech(cfg: dict, engine: str) -> list[str]:
     """音声合成 engine を使える状態にする。行ったことを返す。"""
     s = settings(cfg)

@@ -50,6 +50,11 @@ def env(monkeypatch, tmp_path):
         return []
     monkeypatch.setattr(hub, "free_vram_for_generation", noop)
     monkeypatch.setattr(gpu_switch, "for_speech", for_speech)
+    calls["up"] = False
+
+    async def speech_up(cfg, engine):
+        return calls["up"]
+    monkeypatch.setattr(gpu_switch, "speech_up", speech_up)
     monkeypatch.setattr(gpu_switch, "stop_speech", stop_speech)
     calls["handler"] = lambda req: httpx.Response(200, content=make_wav(), headers={"content-type": "audio/wav"})
 
@@ -292,3 +297,12 @@ def test_endpoint_schedules_idle_unless_zero(env):
         assert (await c.post("/speech/generate", json={"engine": "qwen3", "text": "a"})).status_code == 200
         assert len(unloads(env)) == 1   # 0 なら従来どおり生成のたびに降ろす
     run(go)
+
+
+def test_running_engine_skips_the_gpu_switch(env):
+    env["up"] = True
+    asyncio.run(speech.synthesize({}, "qwen3", "a", keep_loaded=True))
+    assert env["for_speech"] == [] and ("POST", "/tts") in env["http"]
+    env["up"] = False
+    asyncio.run(speech.synthesize({}, "qwen3", "a"))
+    assert env["for_speech"] == ["qwen3"]
