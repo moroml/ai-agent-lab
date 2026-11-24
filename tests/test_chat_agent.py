@@ -827,7 +827,9 @@ def test_generate_speech_saves_wav_with_voice(monkeypatch, workspace):
     seen = {}
 
     def handler(req):
-        seen.update(url=str(req.url), body=_json.loads(req.content))
+        seen.setdefault("urls", []).append(str(req.url))
+        if req.url.path == "/tts":
+            seen["body"] = _json.loads(req.content)
         return httpx.Response(200, content=b"RIFFwav", headers={"content-type": "audio/wav"})
     speech_hub(monkeypatch, handler, seen, cat={"engine": "indextts"})
     (workspace / "chat_s1").mkdir()
@@ -835,7 +837,7 @@ def test_generate_speech_saves_wav_with_voice(monkeypatch, workspace):
     chat, _ = fake_chat([call("generate_speech", text="こんにちは", voice="me.wav", style="嬉しそうに"), {"content": "ok"}])
     monkeypatch.setattr(llm, "chat", chat)
     evs = collect(chat_agent.run({}, "m", [{"role": "user", "content": "q"}], subdir="chat_s1"))
-    assert seen["engine"] == "indextts" and seen["url"] == "http://tts-indextts/tts"
+    assert seen["engine"] == "indextts" and seen["urls"] == ["http://tts-indextts/tts", "http://tts-indextts/unload"]
     assert seen["body"] == {"text": "こんにちは", "ref_audio": str(workspace / "chat_s1" / "me.wav"), "style": "嬉しそうに"}
     wav = [e["file"] for e in evs if "file" in e]
     assert len(wav) == 1 and wav[0]["path"].startswith("speech_") and wav[0]["path"].endswith(".wav")

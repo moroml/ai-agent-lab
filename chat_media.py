@@ -368,7 +368,14 @@ async def generate_speech(cfg, box, text, engine=None, language=None, voice=None
         base = sw.settings(cfg)["speech"][engine]["base"].rstrip("/")
         try:
             async with httpx.AsyncClient(timeout=httpx.Timeout(30, read=SPEECH_WAIT), trust_env=False) as client:
-                resp = await client.post(base + "/tts", json=body)
+                try:
+                    resp = await client.post(base + "/tts", json=body)
+                finally:
+                    if hub._cat(cfg, "speech").get("unload_after", True):   # 続く返答の LLM に VRAM を返す
+                        try:
+                            await client.post(base + "/unload", timeout=30)
+                        except httpx.HTTPError:
+                            pass
         except httpx.HTTPError as exc:
             raise MediaError(f"音声合成 {engine} から応答がありません ({exc.__class__.__name__})") from exc
     if resp.status_code >= 400:
