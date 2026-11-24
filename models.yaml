@@ -685,3 +685,4 @@ categories:
     engine: qwen3            # チャットの generate_speech の既定 (qwen3 / indextts / fish)。C:/project/tts-<engine>
     unload_llm: true         # fish は単独で VRAM の大半を使う。生成前に Ollama を降ろす
     unload_after: true       # 生成後に音声合成のモデルを降ろし、続く返答の LLM に VRAM を返す
+    idle_unload_sec: 120     # 音声画面: 最後の生成からこの秒数たったらモデルを降ろす (0 で生成のたびに降ろす)。毎回の読み込みは 12〜50 秒かかる
