@@ -578,10 +578,11 @@ async def free_vram(req: FreeReq) -> dict:
     if "speech" in targets:
         if gpu_switch.music_busy.locked():
             raise HTTPException(409, "音楽か音声を生成中です。終わってから空けてください")
-        try:
-            done += [f"{m}しました" for m in await gpu_switch.stop_speech(cfg)]
-        except gpu_switch.SwitchError as exc:
-            raise HTTPException(502, str(exc)) from exc
+        async with gpu_switch.music_busy:   # 止める間に音声の生成が始まらないように
+            try:
+                done += [f"{m}しました" for m in await gpu_switch.stop_speech(cfg)]
+            except gpu_switch.SwitchError as exc:
+                raise HTTPException(502, str(exc)) from exc
     return {"done": done or ["空けるものはありませんでした"]}
 
 
