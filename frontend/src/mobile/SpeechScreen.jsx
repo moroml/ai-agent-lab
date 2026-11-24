@@ -2,13 +2,39 @@
 // 入力は PC 版と同じ保存先 (hub.speech.form)。モデルは最後の生成からしばらくして自動で降ろす。
 import { useEffect, useRef, useState } from "react";
 import { AudioLines, Check, ChevronRight, Download, Mic, RefreshCw, SlidersHorizontal, Square, Trash2, Upload, UserRound } from "lucide-react";
-import { Button, cx, Empty, Field, inputCls, Loading, Notice, Progress, ScreenHeader, Sheet } from "./ui.jsx";
+import { Button, cx, Empty, Field, inputCls, Loading, Notice, Progress, ScreenHeader, Segmented, Sheet } from "./ui.jsx";
 import { fmtTime, MAX_REC_SEC, MAX_TEXT, useSpeech } from "../hub/useSpeech.js";
+import BatchScreen from "./BatchScreen.jsx";
+import VoiceCreateScreen from "./VoiceCreateScreen.jsx";
 
 const LICENSE_NOTE = { false: "商用利用は不可 (研究・個人利用向け)", null: "商用利用はライセンスを確認してください", true: "商用利用可" };
 
+const TABS = [
+  { value: "read", label: "読み上げ" },
+  { value: "create", label: "声を作る" },
+  { value: "batch", label: "一括書き出し" },
+];
+
+// 上の切り替えで3つの画面を行き来する。状態は useSpeech が持ち、どの画面からも同じ声の見本を使う
 export default function SpeechScreen() {
   const s = useSpeech();
+  const [tab, setTab] = useState("read");
+  const useVoice = (name) => { s.pickVoice(name); setTab("read"); };
+  return (
+    <div className="flex h-full flex-col">
+      <ScreenHeader title="音声">
+        <div className="px-4 pb-3"><Segmented label="音声の画面" options={TABS} value={tab} onChange={setTab} /></div>
+      </ScreenHeader>
+      <div className="min-h-0 flex-1">
+        {tab === "read" && <ReadPanel s={s} />}
+        {tab === "create" && <div className="h-full overflow-y-auto overscroll-contain"><VoiceCreateScreen s={s} onUse={useVoice} /></div>}
+        {tab === "batch" && <div className="h-full overflow-y-auto overscroll-contain"><BatchScreen s={s} active /></div>}
+      </div>
+    </div>
+  );
+}
+
+function ReadPanel({ s }) {
   const { info, engine, form, set } = s;
   const [optionsOpen, setOptionsOpen] = useState(false);
   const [saved, setSaved] = useState(null);   // 「この声を見本にする」を押した履歴
@@ -28,8 +54,6 @@ export default function SpeechScreen() {
 
   return (
     <div className="flex h-full flex-col">
-      <ScreenHeader title="音声" />
-
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4">
         {info === undefined && <Loading text="エンジンの情報を読み込んでいます…" />}
         {info === null && <Notice tone="error">{`エンジンの情報を取得できませんでした: ${s.error}`}</Notice>}
