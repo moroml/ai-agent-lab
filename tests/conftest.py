@@ -12,8 +12,8 @@ import orchestrator
 def _no_real_gpu_switch(monkeypatch):
     """テストから本物の ACE-Step を止めたり起動したりしない (実際に止めた 2026-11-13)。
     個別のテストが差し替えたいときは、そのテスト内で上書きすればよい。"""
-    monkeypatch.setattr(gpu_switch, "acestep_processes", lambda pattern: [])
-    monkeypatch.setattr(gpu_switch, "start_acestep",
+    monkeypatch.setattr(gpu_switch, "find_processes", lambda pattern: [])
+    monkeypatch.setattr(gpu_switch, "run_start_script",
                         lambda script: pytest.fail("テストから ACE-Step を起動しようとした"))
 
 

@@ -226,7 +226,7 @@ def _pid(sid: str, cfg: dict) -> int | None:
         procs = [p for p in _ollama_procs() if "serve" in _cmdline(p)] or _ollama_procs()
         return procs[0].pid if procs else None
     if sid == "acestep":
-        procs = gpu_switch.acestep_processes(gpu_switch.settings(cfg)["acestep_process"])
+        procs = gpu_switch.find_processes(gpu_switch.settings(cfg)["acestep_process"])
         return procs[0].pid if procs else None
     base = _comfy_base(cfg) if sid == "comfy" else hub.studio_base(cfg)
     p = _port_owner(_port_of(base))
@@ -363,7 +363,7 @@ async def _start(sid: str) -> str:
     else:
         s = gpu_switch.settings(cfg)
         try:
-            await asyncio.to_thread(gpu_switch.start_acestep, s["acestep_start"])
+            await asyncio.to_thread(gpu_switch.run_start_script, s["acestep_start"])
         except (OSError, subprocess.SubprocessError) as e:
             raise HTTPException(502, f"ACE-Step を起動できません: {e}") from e
         msg = "ACE-Step を起動しています (準備に1〜3分かかります)"
@@ -383,7 +383,7 @@ async def _stop(sid: str) -> str:
     elif sid == "acestep":
         if gpu_switch.music_busy.locked():
             raise HTTPException(409, "音楽を生成中です。終わってから止めてください")
-        procs = await asyncio.to_thread(gpu_switch.acestep_processes, gpu_switch.settings(cfg)["acestep_process"])
+        procs = await asyncio.to_thread(gpu_switch.find_processes, gpu_switch.settings(cfg)["acestep_process"])
     elif sid == "studio":
         procs = await asyncio.to_thread(_studio_procs)
     else:
