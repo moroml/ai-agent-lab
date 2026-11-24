@@ -99,7 +99,7 @@ export function useSpeech() {
     try {
       await deleteVoice(v.name);
       setVoices((xs) => xs.filter((x) => x.name !== v.name));
-      if (form.voice === v.name) pickVoice("");
+      setKept((f) => (f.voice === v.name ? { ...f, voice: "", voiceText: "" } : f));   // 待つ間に選び直したものは消さない
     } catch (e) { setError(`削除できませんでした: ${e.message}`); }
   }
   async function addVoice(blob, filename) {
@@ -125,11 +125,13 @@ export function useSpeech() {
   const [recording, setRecording] = useState(false);
   const [recSec, setRecSec] = useState(0);
   const rec = useRef(null);
+  const alive = useRef(true);
   const recSupport = recordSupport();
   async function startRecording() {
     setError("");
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (!alive.current) return stream.getTracks().forEach((t) => t.stop());   // 許可を待つ間に画面を離れた
       const mr = new MediaRecorder(stream);
       const chunks = [];
       const t0 = Date.now();
@@ -148,7 +150,7 @@ export function useSpeech() {
         const ext = /ogg/.test(type) ? "ogg" : /mp4|aac/.test(type) ? "m4a" : "webm";
         const d = new Date();
         const stamp = `${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}_${String(d.getHours()).padStart(2, "0")}${String(d.getMinutes()).padStart(2, "0")}`;
-        if (chunks.length) addVoice(new Blob(chunks, { type }), `録音_${stamp}.${ext}`);
+        if (chunks.length && alive.current) addVoice(new Blob(chunks, { type }), `録音_${stamp}.${ext}`);
       };
       rec.current = mr;
       setRecSec(0);
@@ -159,7 +161,10 @@ export function useSpeech() {
     }
   }
   const stopRecording = () => rec.current?.state === "recording" && rec.current.stop();
-  useEffect(() => () => { if (rec.current?.state === "recording") rec.current.stop(); }, []);
+  useEffect(() => () => {   // 画面を離れたら録音を捨てて、マイクを放す
+    alive.current = false;
+    if (rec.current?.state === "recording") rec.current.stop();
+  }, []);
 
   return {
     info, items, voices, form, set, engine, language, speaker, busy, elapsed, error, setError, fresh,
