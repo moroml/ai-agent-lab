@@ -30,6 +30,7 @@ import llm
 import music
 import openai_api
 import speech
+import speech_batch
 from orchestrator import refusal_model
 from tools import WORKSPACE
 
@@ -880,6 +881,99 @@ async def speech_voice_delete(name: str, request: Request) -> dict:
     path.unlink()
     path.with_suffix(".json").unlink(missing_ok=True)
     return {"deleted": name}
+
+
+class BatchReq(BaseModel):
+    engine: str
+    csv: str = Field(min_length=1, max_length=600_000)
+    voice: str | None = Field(default=None, max_length=100)
+    voice_text: str | None = Field(default=None, max_length=2000)
+    language: str | None = Field(default=None, max_length=20)
+    style: str | None = Field(default=None, max_length=1000)
+    speaker: str | None = Field(default=None, max_length=50)
+    seed: int | None = None
+    format: str = "wav"
+    normalize: bool = True
+    name: str | None = Field(default=None, max_length=100)
+
+
+def _batch_or_404(job: str) -> dict:
+    try:
+        found = speech_batch.get(job)
+    except speech.SpeechInputError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if not found:
+        raise HTTPException(404, "書き出しが見つかりません")
+    return found
+
+
+@router.post("/speech/batch")
+async def speech_batch_start(req: BatchReq, request: Request) -> dict:
+    """セリフ一覧 (CSV) をまとめて音声にし、id 名のファイルと ZIP に書き出す。進み具合は GET /speech/batch/{job}。"""
+    require_local_or_key(request)
+    names = {req.voice} if req.voice else set()
+    try:
+        lines = speech_batch.parse_lines(req.csv)
+    except speech.SpeechInputError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    names |= {ln["voice"] for ln in lines if ln["voice"]}
+    voices = {}
+    for n in names:   # 見つからない声は start が名前を挙げて断る
+        try:
+            p = _voice_path(n)
+        except HTTPException:
+            continue
+        text = req.voice_text if n == req.voice and req.voice_text is not None else _read_meta(p).get("text", "")
+        voices[n] = (str(p), text or None)
+    try:
+        return speech_batch.start(llm.load_config(), engine=req.engine, csv_text=req.csv, voices=voices,
+                                  voice=req.voice, language=req.language, style=req.style, speaker=req.speaker,
+                                  seed=req.seed, fmt=req.format, normalize=req.normalize, name=req.name or "")
+    except speech.SpeechInputError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except gpu_switch.SwitchError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.get("/speech/batch")
+async def speech_batch_list(request: Request) -> dict:
+    require_local_or_key(request)
+    return {"items": speech_batch.list_jobs()}
+
+
+@router.get("/speech/batch/{job}")
+async def speech_batch_get(job: str, request: Request) -> dict:
+    require_local_or_key(request)
+    return _batch_or_404(job)
+
+
+@router.post("/speech/batch/{job}/cancel")
+async def speech_batch_cancel(job: str, request: Request) -> dict:
+    require_local_or_key(request)
+    _batch_or_404(job)
+    return speech_batch.cancel(job)
+
+
+@router.get("/speech/batch/{job}/zip")
+async def speech_batch_zip(job: str, request: Request):
+    require_local_or_key(request)
+    found = _batch_or_404(job)
+    path = speech_batch.zip_path(job)
+    if not path:
+        raise HTTPException(404, "ZIP はまだできていません")
+    safe = re.sub(r"[^\w\-]+", "_", found["name"]).strip("_") or job
+    return FileResponse(path, media_type="application/zip", filename=f"{safe}.zip")
+
+
+@router.delete("/speech/batch/{job}")
+async def speech_batch_delete(job: str, request: Request) -> dict:
+    require_local_or_key(request)
+    _batch_or_404(job)
+    try:
+        await asyncio.to_thread(speech_batch.delete, job)
+    except gpu_switch.SwitchError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return {"deleted": job}
 
 
 # ------------------------------------------------------------------ categories
