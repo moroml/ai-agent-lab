@@ -6,9 +6,10 @@ $ProgressPreference = 'SilentlyContinue'
 Set-Location 'C:\project\ai-agent-lab'
 # 止めるのはコマンド行が server.py で終わるものだけ。'*server.py*' だと ACE-Step の
 # acestep\api_server.py まで止めていた (2026-11-13)
+# Only a bare relative 'server.py': the TTS servers run C:\project\tts-<engine>\server.py (2026-11-24)
 
 Get-CimInstance Win32_Process |
-  Where-Object { $_.CommandLine -match '(^|[\s"\\/])server\.py\s*$' -and $_.Name -like 'python*' } |
+  Where-Object { $_.CommandLine -match '(^|[\s"])server\.py\s*$' -and $_.Name -like 'python*' } |
   ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 Start-Sleep -Seconds 3
 
@@ -30,7 +31,7 @@ for ($i = 0; $i -lt 30; $i++) {
 if (-not $ok) { throw 'health check did not pass within ~120s' }
 
 $sv = Get-CimInstance Win32_Process |
-  Where-Object { $_.CommandLine -match '(^|[\s"\\/])server\.py\s*$' -and $_.Name -like 'python*' } |
+  Where-Object { $_.CommandLine -match '(^|[\s"])server\.py\s*$' -and $_.Name -like 'python*' } |
   Select-Object -First 1
 if ($sv) { $sv.ProcessId | Out-File '.\.server.pid' -Encoding ascii }
 "restarted: server pid=$($sv.ProcessId) health OK"
