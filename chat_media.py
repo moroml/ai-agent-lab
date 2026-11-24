@@ -357,6 +357,8 @@ async def generate_speech(cfg, box, text, engine=None, language=None, voice=None
         path = box._safe_path(str(voice))
         if not path.lower().endswith(AUDIO_EXTS) or not await asyncio.to_thread(os.path.isfile, path):
             raise MediaError(f"声の見本の音声が作業フォルダにありません (wav/mp3/flac): {voice}")
+        if not os.path.realpath(path).startswith(os.path.realpath(box.root) + os.sep):   # リンクで外を指すもの
+            raise MediaError(f"声の見本は作業フォルダの中のファイルにしてください: {voice}")
         body["ref_audio"] = path
     body.update({k: str(v) for k, v in (("ref_text", voice_text), ("language", language),
                                          ("style", style), ("speaker", speaker)) if v})
