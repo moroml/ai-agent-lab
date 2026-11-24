@@ -808,6 +808,11 @@ def speech_hub(monkeypatch, handler, seen, cat=None):
         def settings(cfg):
             return {"speech": {e: {"base": f"http://tts-{e}"} for e in ("qwen3", "indextts", "fish")}}
 
+        @staticmethod
+        async def stop_speech(cfg):
+            seen["stopped"] = seen.get("stopped", 0) + 1
+            return []
+
     class Hub:
         gpu_switch = Switch
         _cat = staticmethod(lambda cfg, name: cat or {})
@@ -857,4 +862,19 @@ def test_generate_speech_reports_server_error_and_missing_voice(monkeypatch, wor
     assert all(r["ok"] is False for r in res) and seen["engine"] == "qwen3"
     assert "unknown speaker: x" in res[0]["summary"] and "nope.wav" in res[1]["summary"]
     assert "引数エラー" in res[2]["summary"]
-    assert not any("file" in e for e in evs)
+    assert not any("file" in e for e in evs) and seen["stopped"] == 1   # /unload も 400 なので止める
+
+
+def test_generate_speech_stops_server_when_unload_fails(monkeypatch, workspace):
+    import httpx
+    seen = {}
+
+    def handler(req):
+        if req.url.path == "/unload":
+            return httpx.Response(500, json={"error": "boom"})
+        return httpx.Response(200, content=b"RIFFwav")
+    speech_hub(monkeypatch, handler, seen)
+    chat, _ = fake_chat([call("generate_speech", text="hi"), {"content": "ok"}])
+    monkeypatch.setattr(llm, "chat", chat)
+    evs = collect(chat_agent.run({}, "m", [{"role": "user", "content": "q"}], subdir="chat_s3"))
+    assert seen["stopped"] == 1 and any("file" in e for e in evs)

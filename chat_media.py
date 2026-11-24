@@ -375,9 +375,14 @@ async def generate_speech(cfg, box, text, engine=None, language=None, voice=None
                 finally:
                     if hub._cat(cfg, "speech").get("unload_after", True):   # 続く返答の LLM に VRAM を返す
                         try:
-                            await client.post(base + "/unload", timeout=30)
+                            freed = (await client.post(base + "/unload", timeout=30)).status_code == 200
                         except httpx.HTTPError:
-                            pass
+                            freed = False
+                        if not freed:   # 降ろせなければプロセスごと止めて VRAM を返す
+                            try:
+                                await sw.stop_speech(cfg)
+                            except sw.SwitchError:
+                                pass
         except httpx.HTTPError as exc:
             raise MediaError(f"音声合成 {engine} から応答がありません ({exc.__class__.__name__})") from exc
     if resp.status_code >= 400:
