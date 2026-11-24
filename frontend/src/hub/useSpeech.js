@@ -19,7 +19,7 @@ function recordSupport() {
 }
 
 // 押す→「削除?」→3秒以内にもう一度、の2段階。削除は元に戻せないため
-function useArmed() {
+export function useArmed() {
   const [armed, setArmed] = useState(null);
   useEffect(() => {
     if (!armed) return undefined;
@@ -121,6 +121,13 @@ export function useSpeech() {
     } catch (e) { setError(`声の見本にできませんでした: ${e.message}`); return null; }
   }
 
+  // 「声を作る」で気に入った試し声を、名前を付けて声の見本にする。選ぶのは呼び出し側 (pickVoice)
+  async function saveVoice(file, name) {
+    const v = await voiceFromResult(file, { name });
+    setVoices((xs) => [v, ...xs.filter((x) => x.name !== v.name)]);
+    return v;
+  }
+
   // マイク録音。止めると webm/ogg/m4a のままサーバーへ送り、wav に変えて登録する
   const [recording, setRecording] = useState(false);
   const [recSec, setRecSec] = useState(0);
@@ -168,7 +175,7 @@ export function useSpeech() {
 
   return {
     info, items, voices, form, set, engine, language, speaker, busy, elapsed, error, setError, fresh,
-    armed, armedVoice, reload, generate, remove, pickVoice, removeVoice, addVoice, useAsVoice,
+    armed, armedVoice, reload, reloadVoices, saveVoice, generate, remove, pickVoice, removeVoice, addVoice, useAsVoice,
     recording, recSec, recSupport, startRecording, stopRecording,
   };
 }

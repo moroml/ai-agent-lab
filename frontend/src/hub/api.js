@@ -75,11 +75,27 @@ export const deleteSpeech = (file) => fetch(`/speech/file/${encodeURIComponent(f
 export const speechVoices = () => get("/speech/voices");
 export const deleteVoice = (name) => fetch(`/speech/voices/${encodeURIComponent(name)}`, { method: "DELETE" }).then(jsonOrThrow);
 // 声の見本の登録。ファイルも、マイクの録音 (webm/ogg/m4a) もそのまま送る (サーバーが wav にする)
-export function uploadVoice(blob, filename, name, text) {
+// 動画も送れる。start は動画・音声の切り出し開始秒 (そこから30秒を見本にする)
+export function uploadVoice(blob, filename, name, text, start = 0) {
   const body = new FormData();
   body.append("file", blob, filename);
   body.append("name", name || "");
   body.append("text", text || "");
+  body.append("start", String(start || 0));
   return fetch("/speech/voices", { method: "POST", body }).then(jsonOrThrow);
 }
 export const voiceFromResult = (file, body = {}) => post(`/speech/voices/from/${encodeURIComponent(file)}`, body);
+// 画像・動画の見た目から声の説明を作る (初回は約30秒)
+export function describeVoice(file, hint) {
+  const body = new FormData();
+  body.append("file", file, file.name);
+  body.append("hint", hint || "");
+  return fetch("/speech/describe", { method: "POST", body }).then(jsonOrThrow);
+}
+
+// 一括書き出し
+export const batchStart = (body) => post("/speech/batch", body);
+export const batchList = () => get("/speech/batch");
+export const batchGet = (job) => get(`/speech/batch/${encodeURIComponent(job)}`);
+export const batchCancel = (job) => post(`/speech/batch/${encodeURIComponent(job)}/cancel`, {});
+export const batchDelete = (job) => fetch(`/speech/batch/${encodeURIComponent(job)}`, { method: "DELETE" }).then(jsonOrThrow);
