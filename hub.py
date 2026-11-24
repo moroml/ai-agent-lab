@@ -216,7 +216,7 @@ async def _submit_studio(path: str, body: dict, timeout: float) -> dict:
     """ACE-Step を止めてから投入する。止める〜投入の間に音楽側が ComfyUI を解放しないよう
     同じロックで直列にする (投入後は ComfyUI のキューを見て音楽側が待つ)。"""
     if gpu_switch.music_busy.locked():
-        raise HTTPException(409, "音楽を生成中です。終わってから画像・動画を生成してください")
+        raise HTTPException(409, "音楽か音声を生成中です。終わってから画像・動画を生成してください")
     async with gpu_switch.music_busy:
         try:
             switched = await gpu_switch.for_studio(llm.load_config())

@@ -755,7 +755,7 @@ def test_generate_3d_waits_for_music_to_finish(monkeypatch, workspace):
     (workspace / "chat_m1").mkdir()
     (workspace / "chat_m1" / "a.png").write_bytes(b"png")
     evs, _ = media_run(monkeypatch, [call("generate_3d", image_path="a.png"), {"content": "ok"}])
-    assert "音楽を生成中" in tool_result(evs)["summary"] and not comfy.prompts
+    assert "音楽か音声を生成中" in tool_result(evs)["summary"] and not comfy.prompts
 
 
 def test_trellis_workflow_file_matches_the_node_ids():
@@ -788,3 +788,71 @@ def test_generate_3d_lost_connection_cancels_the_job(monkeypatch, workspace):
     (workspace / "chat_m1" / "a.png").write_bytes(b"png")
     evs, _ = media_run(monkeypatch, [call("generate_3d", image_path="a.png"), {"content": "ok"}])
     assert "接続できません" in tool_result(evs)["summary"] and comfy.cancels == ["/api/jobs/p1/cancel"]
+
+
+# ---- generate_speech (ローカルの音声合成。GPU 切り替えと HTTP は差し替え) ----
+def speech_hub(monkeypatch, handler, seen, cat=None):
+    import httpx
+    real = httpx.AsyncClient
+
+    class Switch:
+        SwitchError = type("SwitchError", (Exception,), {})
+        music_busy = asyncio.Lock()
+
+        @staticmethod
+        async def for_speech(cfg, engine):
+            seen["engine"] = engine
+            return []
+
+        @staticmethod
+        def settings(cfg):
+            return {"speech": {e: {"base": f"http://tts-{e}"} for e in ("qwen3", "indextts", "fish")}}
+
+    class Hub:
+        gpu_switch = Switch
+        _cat = staticmethod(lambda cfg, name: cat or {})
+        _music_running = staticmethod(lambda: 0)
+
+        @staticmethod
+        async def free_vram_for_generation(cfg, c, running):
+            return []
+    monkeypatch.setattr(chat_media, "_hub", lambda: Hub)
+    monkeypatch.setattr(chat_media.httpx, "AsyncClient",
+                        lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
+
+
+def test_generate_speech_saves_wav_with_voice(monkeypatch, workspace):
+    import httpx
+    import json as _json
+    seen = {}
+
+    def handler(req):
+        seen.update(url=str(req.url), body=_json.loads(req.content))
+        return httpx.Response(200, content=b"RIFFwav", headers={"content-type": "audio/wav"})
+    speech_hub(monkeypatch, handler, seen, cat={"engine": "indextts"})
+    (workspace / "chat_s1").mkdir()
+    (workspace / "chat_s1" / "me.wav").write_bytes(b"ref")
+    chat, _ = fake_chat([call("generate_speech", text="こんにちは", voice="me.wav", style="嬉しそうに"), {"content": "ok"}])
+    monkeypatch.setattr(llm, "chat", chat)
+    evs = collect(chat_agent.run({}, "m", [{"role": "user", "content": "q"}], subdir="chat_s1"))
+    assert seen["engine"] == "indextts" and seen["url"] == "http://tts-indextts/tts"
+    assert seen["body"] == {"text": "こんにちは", "ref_audio": str(workspace / "chat_s1" / "me.wav"), "style": "嬉しそうに"}
+    wav = [e["file"] for e in evs if "file" in e]
+    assert len(wav) == 1 and wav[0]["path"].startswith("speech_") and wav[0]["path"].endswith(".wav")
+    assert (workspace / "chat_s1" / wav[0]["path"]).read_bytes() == b"RIFFwav"
+
+
+def test_generate_speech_reports_server_error_and_missing_voice(monkeypatch, workspace):
+    import httpx
+    seen = {}
+    speech_hub(monkeypatch, lambda req: httpx.Response(400, json={"error": "unknown speaker: x"}), seen)
+    chat, _ = fake_chat([call("generate_speech", text="hi", speaker="x"),
+                         call("generate_speech", text="hi", voice="nope.wav"),
+                         call("generate_speech", text="hi", engine="other"), {"content": "ok"}])
+    monkeypatch.setattr(llm, "chat", chat)
+    evs = collect(chat_agent.run({}, "m", [{"role": "user", "content": "q"}], subdir="chat_s2"))
+    res = [e["tool_result"] for e in evs if "tool_result" in e]
+    assert all(r["ok"] is False for r in res) and seen["engine"] == "qwen3"
+    assert "unknown speaker: x" in res[0]["summary"] and "nope.wav" in res[1]["summary"]
+    assert "引数エラー" in res[2]["summary"]
+    assert not any("file" in e for e in evs)

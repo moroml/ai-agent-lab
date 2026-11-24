@@ -1,5 +1,5 @@
-"""チャットから画像・動画・音楽・3D を作るツール (画像・動画は Local Gen Studio、音楽は ACE-Step、
-3D は LGS の ComfyUI 上の TRELLIS 2 と、承認制の Blender スクリプト)。
+"""チャットから画像・動画・音楽・音声・3D を作るツール (画像・動画は Local Gen Studio、音楽は ACE-Step、
+音声はローカルの音声合成 (C:/project/tts-<engine>)、3D は LGS の ComfyUI 上の TRELLIS 2 と、承認制の Blender スクリプト)。
 
 結果は会話の作業フォルダ (Toolbox の root) へ保存し、相対パスを返す。画面はそのパスから
 プレビューとリンクを出す。LGS が止まっているときは、例外にせず日本語のエラー文字列を返す。
@@ -30,7 +30,10 @@ BLENDER_WAIT = 180   # Blender を待つ上限秒
 TAIL_BYTES = 20000   # Blender の出力で残す末尾 (エラー文の探索用)
 SCRIPT_MAX = 50000
 NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
-TRELLIS_WAIT = 3600  # TRELLIS 2 (形→高解像度→色の3段) を待つ上限秒
+SPEECH_WAIT = 900    # 音声合成を待つ上限秒 (初回はモデルの読み込みを含む)
+SPEECH_ENGINES = ("qwen3", "indextts", "fish")
+AUDIO_EXTS = (".wav", ".mp3", ".flac", ".ogg", ".m4a")
+TRELLIS_WAIT = 3600 # TRELLIS 2 (形→高解像度→色の3段) を待つ上限秒
 TRELLIS_WORKFLOW = os.path.join(os.path.dirname(os.path.abspath(__file__)), "workflows", "trellis2_image_to_3d.json")
 TRELLIS_SEEDS = ("3", "12", "18", "23")   # ワークフローの KSampler
 TRELLIS_IMAGE_NODE, TRELLIS_SAVE_NODE = "122", "322"   # LoadImage と SaveGLB
@@ -78,6 +81,21 @@ SCHEMA = [
             "duration": {"type": "number", "description": "長さ(秒)。10〜600。省略で設定の既定"},
             "instrumental": {"type": "boolean", "description": "true で歌なし"}},
             "required": ["prompt"]}}},
+    {"type": "function", "function": {
+        "name": "generate_speech",
+        "description": "文章を読み上げた音声(wav)を作業フォルダに保存する(ローカルの音声合成。初回はモデルの読み込みで1〜数分)。"
+                       "engine: qwen3=速く安定・多言語・プリセット話者や声の説明から声を作れる(既定) / "
+                       "indextts=声のまねと感情の指示に強い / fish=表現が最も豊かで演技の指示が効く(重い・非商用ライセンス)。"
+                       "voice に作業フォルダの音声を渡すと、その声で読む",
+        "parameters": {"type": "object", "properties": {
+            "text": {"type": "string", "description": "読み上げる文章 (5000字まで)"},
+            "engine": {"type": "string", "enum": list(SPEECH_ENGINES), "description": "省略で設定の既定"},
+            "language": {"type": "string", "description": "ja / en / zh など。省略で自動"},
+            "voice": {"type": "string", "description": "まねる声の音声 (作業フォルダからの相対。wav/mp3/flac、3〜20秒)"},
+            "voice_text": {"type": "string", "description": "voice の音声で話している内容 (分かれば。似せる精度が上がる)"},
+            "style": {"type": "string", "description": "話し方の指示。qwen3 は声の特徴や口調、indextts は感情、fish は演技"},
+            "speaker": {"type": "string", "description": "qwen3 のプリセット話者名。省略可"}},
+            "required": ["text"]}}},
     {"type": "function", "function": {
         "name": "generate_3d",
         "description": "3Dモデル(glb)を AI (TRELLIS 2) で作り、確認用の png と一緒に作業フォルダに保存する(10〜30分かかる)。"
@@ -321,6 +339,51 @@ async def generate_music(cfg, box, prompt, lyrics=None, duration=None, instrumen
     return f"音楽を作成しました: {rel}", [rel]
 
 
+def _write_bytes(path, data):
+    with open(path, "wb") as f:
+        f.write(data)
+
+
+async def generate_speech(cfg, box, text, engine=None, language=None, voice=None, voice_text=None,
+                          style=None, speaker=None):
+    hub = _hub()
+    engine = engine or hub._cat(cfg, "speech").get("engine") or SPEECH_ENGINES[0]
+    if engine not in SPEECH_ENGINES:
+        raise ValueError(f"engine は {' / '.join(SPEECH_ENGINES)} のどれか")
+    body = {"text": str(text)}
+    if voice:
+        path = box._safe_path(str(voice))
+        if not path.lower().endswith(AUDIO_EXTS) or not await asyncio.to_thread(os.path.isfile, path):
+            raise MediaError(f"声の見本の音声が作業フォルダにありません (wav/mp3/flac): {voice}")
+        body["ref_audio"] = path
+    body.update({k: str(v) for k, v in (("ref_text", voice_text), ("language", language),
+                                         ("style", style), ("speaker", speaker)) if v})
+    sw = hub.gpu_switch
+    async with sw.music_busy:   # 生成中に音楽・画像側がこのエンジンを止めないように
+        await _free_vram(cfg, "speech")
+        try:
+            await sw.for_speech(cfg, engine)
+        except sw.SwitchError as exc:
+            raise MediaError(str(exc)) from exc
+        base = sw.settings(cfg)["speech"][engine]["base"].rstrip("/")
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(30, read=SPEECH_WAIT), trust_env=False) as client:
+                resp = await client.post(base + "/tts", json=body)
+        except httpx.HTTPError as exc:
+            raise MediaError(f"音声合成 {engine} から応答がありません ({exc.__class__.__name__})") from exc
+    if resp.status_code >= 400:
+        try:
+            detail = resp.json().get("error")
+        except ValueError:
+            detail = None
+        raise MediaError(f"音声合成 {engine}: {detail or f'HTTP {resp.status_code}'}")
+    rel = f"speech_{uuid.uuid4().hex[:8]}.wav"
+    path = box._safe_path(rel)
+    await asyncio.to_thread(os.makedirs, os.path.dirname(path), exist_ok=True)
+    await asyncio.to_thread(_write_bytes, path, resp.content)
+    return f"音声を作成しました: {rel} ({engine})", [rel]
+
+
 def _comfy_base(cfg):
     return _hub().gpu_switch.settings(cfg)["comfy_base"].rstrip("/")
 
@@ -350,7 +413,7 @@ async def _queue_comfy(cfg, workflow):
     """ACE-Step を止めてから ComfyUI に投入する (LGS への投入と同じロックで直列にする)。"""
     sw = _hub().gpu_switch
     if sw.music_busy.locked():
-        raise MediaError("音楽を生成中です。終わってから3Dを作ってください")
+        raise MediaError("音楽か音声を生成中です。終わってから3Dを作ってください")
     async with sw.music_busy:
         try:
             await sw.for_studio(cfg)
@@ -548,7 +611,8 @@ async def call(cfg, box, name, args):
     if not isinstance(args, dict):
         return f"[引数エラー] {name}: 引数がオブジェクトでない", []
     fn = {"generate_image": generate_image, "edit_image": edit_image, "generate_video": generate_video,
-          "generate_music": generate_music, "generate_3d": generate_3d, "make_3d": make_3d}[name]
+          "generate_music": generate_music, "generate_speech": generate_speech, "generate_3d": generate_3d,
+          "make_3d": make_3d}[name]
     try:
         return await fn(cfg, box, **args)
     except MediaError as e:

@@ -382,7 +382,7 @@ async def _stop(sid: str) -> str:
         procs = await asyncio.to_thread(_ollama_procs)
     elif sid == "acestep":
         if gpu_switch.music_busy.locked():
-            raise HTTPException(409, "音楽を生成中です。終わってから止めてください")
+            raise HTTPException(409, "音楽か音声を生成中です。終わってから止めてください")
         procs = await asyncio.to_thread(gpu_switch.find_processes, gpu_switch.settings(cfg)["acestep_process"])
     elif sid == "studio":
         procs = await asyncio.to_thread(_studio_procs)

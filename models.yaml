@@ -680,3 +680,7 @@ categories:
     duration: 30
     lyrics_model: gemma      # 歌詞の下書きに使うチャットモデル
     unload_llm: true         # ACE-Step はピーク15GB前後。生成前に Ollama を降ろす
+  speech:
+    label: 音声
+    engine: qwen3            # チャットの generate_speech の既定 (qwen3 / indextts / fish)。C:/project/tts-<engine>
+    unload_llm: true         # fish は単独で VRAM の大半を使う。生成前に Ollama を降ろす

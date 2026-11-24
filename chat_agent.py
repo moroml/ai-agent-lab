@@ -8,7 +8,7 @@ Run を作らない軽い経路のまま、LLM ⇄ ツールのループを回�
   承認の前に弾き、環境変数の鍵も渡さないが、OS のサンドボックスではない。承認したコマンド・スクリプトは
   このユーザーの権限で PC 全体に触れられる (別の場所の読み書き・ネットワーク通信を含む)。内容を読んでから承認すること。
   Web の文章に誘導された実行は、承認と SYSTEM の指示で防ぐ
-- generate_image / edit_image / generate_video / generate_music / generate_3d は結果を作業フォルダへ保存する (chat_media.py)
+- generate_image / edit_image / generate_video / generate_music / generate_speech / generate_3d は結果を作業フォルダへ保存する (chat_media.py)
 - fetch_url は公開アドレスだけを読む(このPCや LAN 内のサービスを読ませない)
 """
 from __future__ import annotations
