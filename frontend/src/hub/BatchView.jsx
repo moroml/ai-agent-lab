@@ -2,7 +2,7 @@
 import { useRef } from "react";
 import { Download, FileUp, Package, Square, Trash2 } from "lucide-react";
 import { Button, Chips, ErrorNote, Field, inputCls, Progress } from "./ui.jsx";
-import { CSV_HELP, FORMATS, isRunning, useBatch } from "./useBatch.js";
+import { CSV_HELP, fmtDate, FORMATS, isRunning, useBatch } from "./useBatch.js";
 
 const ring = "focus:ring-cyan-500/50";
 const STATE = { running: "実行中", done: "完了", cancelled: "中止", error: "失敗" };
@@ -115,7 +115,7 @@ export default function BatchView({ s, active }) {
               <li key={j.job} className="flex items-center gap-3 rounded-xl border border-slate-800 bg-slate-900/40 p-3">
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium text-slate-100">{j.name || j.job}</p>
-                  <p className="truncate text-[11px] text-slate-500">{[STATE[j.state] ?? j.state, `${j.done} / ${j.total}`, !!j.failed?.length && `失敗${j.failed.length}`, j.engine, j.format, j.created_at].filter(Boolean).join(" · ")}</p>
+                  <p className="truncate text-[11px] text-slate-500">{[STATE[j.state] ?? j.state, `${j.done} / ${j.total}`, !!j.failed?.length && `失敗${j.failed.length}`, j.engine, j.format, fmtDate(j.created_at)].filter(Boolean).join(" · ")}</p>
                 </div>
                 {j.zip_url && <a href={j.zip_url} download className="flex min-h-8 items-center gap-1 px-2 text-xs text-slate-300 hover:text-cyan-200" aria-label={`「${j.name || j.job}」の ZIP をダウンロード`}><Download size={14} aria-hidden="true" /> ZIP</a>}
                 <button type="button" onClick={() => b.remove(j)} disabled={isRunning(j)}

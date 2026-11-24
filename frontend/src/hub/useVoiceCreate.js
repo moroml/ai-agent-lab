@@ -49,6 +49,8 @@ export function useVoiceCreate(s) {
   const [videoVoice, setVideoVoice] = useState(null);   // 動画の声をそのまま保存したときの声の名前
   const [videoBusy, setVideoBusy] = useState(false);
 
+  const fileRef = useRef(null);
+  fileRef.current = file;
   const qwen = s.info?.engines.find((e) => e.key === "qwen3");
   const language = qwen?.languages.includes(lang) ? lang : "";
 
@@ -87,13 +89,14 @@ export function useVoiceCreate(s) {
 
   // 動画に映っている人の声をそのまま見本にする (start 秒から30秒)
   async function useVideoVoice() {
-    if (!file) return;
+    const f = file;
+    if (!f) return;
     setError("");
     setVideoBusy(true);
     try {
-      const v = await uploadVoice(file, file.name, videoName.trim(), "", Math.max(0, Number(start) || 0));
+      const v = await uploadVoice(f, f.name, videoName.trim(), "", Math.max(0, Number(start) || 0));
       await s.reloadVoices();
-      setVideoVoice(v.name);
+      if (fileRef.current === f) setVideoVoice(v.name);   // 待つ間に別の動画を選んだら、その画面には出さない
     } catch (e) {
       setError(`声の見本にできませんでした: ${e.message}`);
     } finally {
@@ -126,7 +129,7 @@ export function useVoiceCreate(s) {
   const setName = (f, v) => setNames((n) => ({ ...n, [f]: v }));
   async function saveTrial(t) {
     const name = (names[t.file] ?? "").trim();
-    if (!name) return;
+    if (!name || savingFile || saved[t.file]) return;   // 保存は1つずつ (同じ試し声の二重保存を防ぐ)
     setError("");
     setSavingFile(t.file);
     try {

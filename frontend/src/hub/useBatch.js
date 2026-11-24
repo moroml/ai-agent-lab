@@ -25,6 +25,7 @@ function readText(file) {
 }
 
 export const isRunning = (j) => j?.state === "running";
+export const fmtDate = (t) => (t ? new Date(t * 1000).toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "");
 
 export function useBatch(s, active) {
   const [kept, setKept] = usePersisted("hub.speech.batch", BLANK);
@@ -67,11 +68,13 @@ export function useBatch(s, active) {
         if (!alive) return;
         setJob(j);
         if (!isRunning(j)) return void reload();
-      } catch (e) {
+      } catch (e) {   // 一時的な通信の失敗でも追い続ける (止めると終わっても実行中のままになる)
         if (!alive) return;
-        setError(`進み具合を取得できません: ${e.message}`);
+        setError(`進み具合を取得できません (再試行します): ${e.message}`);
+        t = setTimeout(tick, POLL_MS * 3);
         return;
       }
+      setError((m) => (m.startsWith("進み具合") ? "" : m));
       t = setTimeout(tick, POLL_MS);
     };
     t = setTimeout(tick, POLL_MS);

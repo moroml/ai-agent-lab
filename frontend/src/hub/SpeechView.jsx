@@ -31,9 +31,10 @@ export default function SpeechView() {
         ))}
       </div>
       <div role="tabpanel" id="speech-panel" aria-labelledby={`speech-tab-${tab}`} className="min-h-0 flex-1">
-        {tab === "read" && <ReadPanel s={s} />}
-        {tab === "create" && <VoiceCreateView s={s} onUse={useVoice} />}
-        {tab === "batch" && <BatchView s={s} active />}
+        {/* 切り替えても試し声や入力が消えないよう、3つとも出したままにして隠す */}
+        <div hidden={tab !== "read"} className="h-full"><ReadPanel s={s} /></div>
+        <div hidden={tab !== "create"} className="h-full"><VoiceCreateView s={s} onUse={useVoice} /></div>
+        <div hidden={tab !== "batch"} className="h-full"><BatchView s={s} active={tab === "batch"} /></div>
       </div>
     </div>
   );

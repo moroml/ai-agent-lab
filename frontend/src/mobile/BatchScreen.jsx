@@ -3,7 +3,7 @@
 import { useRef } from "react";
 import { Download, FileUp, Package, Square, Trash2 } from "lucide-react";
 import { Button, cx, Empty, Field, inputCls, Loading, Notice, Progress, Segmented, SwitchRow } from "./ui.jsx";
-import { CSV_HELP, FORMATS, isRunning, useBatch } from "../hub/useBatch.js";
+import { CSV_HELP, fmtDate, FORMATS, isRunning, useBatch } from "../hub/useBatch.js";
 
 const STATE = { running: "実行中", done: "完了", cancelled: "中止", error: "失敗" };
 const FISH_NOTE = "Fish は非商用ライセンス。販売するゲームには使えません";
@@ -105,7 +105,7 @@ export default function BatchScreen({ s, active }) {
               {items.map((j) => (
                 <li key={j.job} className="rounded-2xl border border-m-line bg-m-surface p-4">
                   <h3 className="text-base font-semibold">{j.name || j.job}</h3>
-                  <p className="text-sm text-m-subtle">{[STATE[j.state] ?? j.state, `${j.done} / ${j.total}`, !!j.failed?.length && `失敗${j.failed.length}`, j.engine, j.format, j.created_at].filter(Boolean).join(" · ")}</p>
+                  <p className="text-sm text-m-subtle">{[STATE[j.state] ?? j.state, `${j.done} / ${j.total}`, !!j.failed?.length && `失敗${j.failed.length}`, j.engine, j.format, fmtDate(j.created_at)].filter(Boolean).join(" · ")}</p>
                   <div className="mt-2 flex flex-wrap gap-2">
                     {j.zip_url && <a href={j.zip_url} download aria-label={`「${j.name || j.job}」の ZIP をダウンロード`} className={zipCls}><Download size={18} aria-hidden="true" /> ZIP</a>}
                     <Button variant={b.armed === j.job ? "danger" : "secondary"} icon={Trash2} disabled={isRunning(j)} onClick={() => b.remove(j)}

@@ -132,7 +132,7 @@ export default function VoiceCreateView({ s, onUse }) {
                 <div className="mt-2 flex items-center gap-2">
                   <input value={c.names[t.file] ?? ""} onChange={(e) => c.setName(t.file, e.target.value)} placeholder="声の名前 (例: 優しい女性)" aria-label="声の名前"
                          className={`${inputCls} ${ring} min-w-0 flex-1`} />
-                  <Button accent="cyan" onClick={() => c.saveTrial(t)} disabled={c.savingFile === t.file || !(c.names[t.file] ?? "").trim()}>
+                  <Button accent="cyan" onClick={() => c.saveTrial(t)} disabled={!!c.savingFile || !(c.names[t.file] ?? "").trim()}>
                     <Save size={16} aria-hidden="true" /> {c.savingFile === t.file ? "保存中…" : "この声を保存"}
                   </Button>
                 </div>

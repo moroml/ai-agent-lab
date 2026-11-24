@@ -111,7 +111,7 @@ export default function VoiceCreateScreen({ s, onUse }) {
                   ) : (
                     <div className="mt-3 space-y-2">
                       <input value={c.names[t.file] ?? ""} onChange={(e) => c.setName(t.file, e.target.value)} placeholder="声の名前 (例: 優しい女性)" aria-label="声の名前" className={inputCls} />
-                      <Button icon={Save} busy={c.savingFile === t.file} disabled={c.savingFile === t.file || !(c.names[t.file] ?? "").trim()} onClick={() => c.saveTrial(t)} className="w-full">この声を保存</Button>
+                      <Button icon={Save} busy={c.savingFile === t.file} disabled={!!c.savingFile || !(c.names[t.file] ?? "").trim()} onClick={() => c.saveTrial(t)} className="w-full">この声を保存</Button>
                     </div>
                   )}
                 </li>

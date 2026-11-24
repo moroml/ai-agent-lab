@@ -26,9 +26,10 @@ export default function SpeechScreen() {
         <div className="px-4 pb-3"><Segmented label="音声の画面" options={TABS} value={tab} onChange={setTab} /></div>
       </ScreenHeader>
       <div className="min-h-0 flex-1">
-        {tab === "read" && <ReadPanel s={s} />}
-        {tab === "create" && <div className="h-full overflow-y-auto overscroll-contain"><VoiceCreateScreen s={s} onUse={useVoice} /></div>}
-        {tab === "batch" && <div className="h-full overflow-y-auto overscroll-contain"><BatchScreen s={s} active /></div>}
+        {/* 切り替えても試し声や入力が消えないよう、3つとも出したままにして隠す */}
+        <div hidden={tab !== "read"} className="h-full"><ReadPanel s={s} /></div>
+        <div hidden={tab !== "create"} className="h-full overflow-y-auto overscroll-contain"><VoiceCreateScreen s={s} onUse={useVoice} /></div>
+        <div hidden={tab !== "batch"} className="h-full overflow-y-auto overscroll-contain"><BatchScreen s={s} active={tab === "batch"} /></div>
       </div>
     </div>
   );
