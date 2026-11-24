@@ -543,14 +543,14 @@ async def set_autoload(req: AutoloadReq) -> dict:
 
 # ------------------------------------------------------------------ VRAM をまとめて空ける
 class FreeReq(BaseModel):
-    # "ollama" (全部) / "ollama:<モデル名>" / "comfy" / "acestep"。空なら全部
+    # "ollama" (全部) / "ollama:<モデル名>" / "comfy" / "acestep" / "speech" (音声合成)。空なら全部
     targets: list[str] = Field(default_factory=list, max_length=20)
 
 
 @router.post("/system/vram/free")
 async def free_vram(req: FreeReq) -> dict:
     cfg = llm.load_config()
-    targets = req.targets or ["ollama", "comfy", "acestep"]
+    targets = req.targets or ["ollama", "comfy", "acestep", "speech"]
     picked = [t.split(":", 1)[1] for t in targets if t.startswith("ollama:")]
     if (picked or "ollama" in targets) and _agent_running():
         raise HTTPException(409, "エージェントの実行中はモデルを降ろせません。先にタスクを止めてください")
@@ -575,6 +575,13 @@ async def free_vram(req: FreeReq) -> dict:
         msg = await _stop("acestep")
         if "停止しました" in msg:
             done.append(msg)
+    if "speech" in targets:
+        if gpu_switch.music_busy.locked():
+            raise HTTPException(409, "音楽か音声を生成中です。終わってから空けてください")
+        try:
+            done += [f"{m}しました" for m in await gpu_switch.stop_speech(cfg)]
+        except gpu_switch.SwitchError as exc:
+            raise HTTPException(502, str(exc)) from exc
     return {"done": done or ["空けるものはありませんでした"]}
 
 

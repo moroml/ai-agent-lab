@@ -177,3 +177,11 @@ def test_studio_starts_on_configured_port_when_bat_differs(client, monkeypatch, 
     monkeypatch.setattr(system, "_spawn", lambda args, env=None, cwd=None, log=None: spawned.append(args))
     assert client.post("/system/services/studio/start").status_code == 200
     assert spawned[0][-1] == "8788"    # bat (8787) ではなく接続先の番号で起動する
+
+
+def test_free_speech_stops_tts_servers(client, monkeypatch):
+    async def stop(cfg):
+        return ["音声合成 fish を停止"]
+    monkeypatch.setattr(system.gpu_switch, "stop_speech", stop)
+    r = client.post("/system/vram/free", json={"targets": ["speech"]})
+    assert r.status_code == 200 and r.json()["done"] == ["音声合成 fish を停止しました"]

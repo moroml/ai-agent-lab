@@ -113,6 +113,11 @@ async def _stop_speech(s: dict, keep: str | None = None) -> list[str]:
     return done
 
 
+async def stop_speech(cfg: dict) -> list[str]:
+    """音声合成のサーバーをすべて止める (VRAM をまとめて空けるとき用)。"""
+    return await _stop_speech(settings(cfg))
+
+
 async def _ensure_up(base: str, pattern: str, script: str, label: str, timeout: float, log: str) -> list[str]:
     health = base.rstrip("/") + "/health"
     if await _up(health):
